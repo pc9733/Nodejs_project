@@ -86,3 +86,16 @@ resource "aws_instance" "practice" {
     Name = each.key
   }
 }
+
+resource "aws_ecr_repository" "practice_node_app" {
+  name                 = "practice-node-app"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = {
+    Name = "practice-node-app"
+  }
+}
