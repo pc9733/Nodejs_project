@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: ghcr.io/${{ github.repository_owner }}
-  IMAGE_NAME: practice-node-app
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: practice-node-app
 
 jobs:
   build-and-deploy:
@@ -37,12 +37,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to registry
-        uses: docker/login-action@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push image
         uses: docker/build-push-action@v5
@@ -51,8 +55,8 @@ jobs:
           file: ./node-app/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
@@ -65,8 +69,10 @@ jobs:
           echo "$KUBE_CONFIG_DATA" | base64 --decode > ~/.kube/config
 
       - name: Deploy manifests
+        env:
+          IMAGE_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/deployment.yaml
-          kubectl -n practice-app set image deploy/practice-node-app node-app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          kubectl -n practice-app set image deploy/practice-node-app node-app=${IMAGE_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
