@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: practice-node-app
+  namespace: practice-app
+  labels:
+    app: practice-node-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: practice-node-app
+  template:
+    metadata:
+      labels:
+        app: practice-node-app
+    spec:
+      containers:
+        - name: node-app
+          image: practice-node-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
