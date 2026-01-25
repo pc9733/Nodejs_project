@@ -1,90 +1,66 @@
 provider "aws" {
-  region = "us-east-1"
+  region = var.aws_region
 }
 
-variable "environment" {
-  description = "Environment name used to influence instance sizing."
-  type        = string
-  default     = "dev"
-}
-
-variable "include_dev" {
-  description = "Whether a dev instance should be created alongside prod."
-  type        = bool
-  default     = true
-}
-
-variable "egress_rules" {
-  description = "Egress firewall rules configured through a dynamic block."
-  type = list(object({
-    description = string
-    from_port   = number
-    to_port     = number
-    protocol    = string
-    cidr_blocks = list(string)
-  }))
-  default = [
-    {
-      description = "Allow all egress"
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
+data "aws_availability_zones" "available" {
+  state = "available"
 }
 
 locals {
-  base_names     = toset(["prd-1"])
-  instance_names = var.include_dev ? toset(["prd-1", "dev-1"]) : local.base_names
+  availability_zones = slice(
+    data.aws_availability_zones.available.names,
+    0,
+    length(var.public_subnet_cidrs)
+  )
 }
 
-data "aws_vpc" "default" {
-  default = true
-}
+resource "aws_vpc" "eks" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_support   = true
+  enable_dns_hostnames = true
 
-resource "aws_security_group" "dynamic" {
-  name        = "practice-dynamic"
-  description = "Security group managed via dynamic blocks"
-  vpc_id      = data.aws_vpc.default.id
-
-  dynamic "ingress" {
-    for_each = var.ingress_rules
-    content {
-      description = ingress.value.description
-      from_port   = ingress.value.from_port
-      to_port     = ingress.value.to_port
-      protocol    = ingress.value.protocol
-      cidr_blocks = ingress.value.cidr_blocks
-    }
+  tags = {
+    Name = "${var.cluster_name}-vpc"
   }
+}
 
-  dynamic "egress" {
-    for_each = var.egress_rules
-    content {
-      description = egress.value.description
-      from_port   = egress.value.from_port
-      to_port     = egress.value.to_port
-      protocol    = egress.value.protocol
-      cidr_blocks = egress.value.cidr_blocks
-    }
+resource "aws_internet_gateway" "eks" {
+  vpc_id = aws_vpc.eks.id
+
+  tags = {
+    Name = "${var.cluster_name}-igw"
+  }
+}
+
+resource "aws_subnet" "public" {
+  count                   = length(var.public_subnet_cidrs)
+  vpc_id                  = aws_vpc.eks.id
+  cidr_block              = var.public_subnet_cidrs[count.index]
+  availability_zone       = local.availability_zones[count.index]
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "${var.cluster_name}-public-${count.index + 1}"
+  }
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.eks.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.eks.id
   }
 
   tags = {
-    Name = "practice-dynamic"
+    Name = "${var.cluster_name}-public-rt"
   }
 }
 
-resource "aws_instance" "practice" {
-  for_each               = local.instance_names
-  instance_type          = var.environment == "prod" ? "t3.medium" : "t3.micro"
-  ami                    = "ami-0ad50334604831820"
-  key_name               = "new"
-  vpc_security_group_ids = [aws_security_group.dynamic.id]
-
-  tags = {
-    Name = each.key
-  }
+resource "aws_route_table_association" "public" {
+  count          = length(aws_subnet.public)
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
 }
 
 resource "aws_ecr_repository" "practice_node_app" {
@@ -98,4 +74,110 @@ resource "aws_ecr_repository" "practice_node_app" {
   tags = {
     Name = "practice-node-app"
   }
+}
+
+resource "aws_iam_role" "eks_cluster" {
+  name = "${var.cluster_name}-cluster-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "eks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSClusterPolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.eks_cluster.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSVPCResourceController" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+  role       = aws_iam_role.eks_cluster.name
+}
+
+resource "aws_cloudwatch_log_group" "eks" {
+  name              = "/aws/eks/${var.cluster_name}/cluster"
+  retention_in_days = 7
+}
+
+resource "aws_eks_cluster" "practice" {
+  name     = var.cluster_name
+  role_arn = aws_iam_role.eks_cluster.arn
+
+  vpc_config {
+    subnet_ids = aws_subnet.public[*].id
+  }
+
+  enabled_cluster_log_types = ["api", "audit", "authenticator"]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy,
+    aws_iam_role_policy_attachment.eks_cluster_AmazonEKSVPCResourceController,
+    aws_cloudwatch_log_group.eks
+  ]
+}
+
+resource "aws_iam_role" "eks_node_group" {
+  name = "${var.cluster_name}-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_group_AmazonEKSWorkerNodePolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.eks_node_group.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_group_AmazonEKS_CNI_Policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.eks_node_group.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_group_AmazonEC2ContainerRegistryReadOnly" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.eks_node_group.name
+}
+
+resource "aws_eks_node_group" "default" {
+  cluster_name    = aws_eks_cluster.practice.name
+  node_group_name = "${var.cluster_name}-node-group"
+  node_role_arn   = aws_iam_role.eks_node_group.arn
+  subnet_ids      = aws_subnet.public[*].id
+  instance_types  = var.node_instance_types
+  capacity_type   = "ON_DEMAND"
+
+  scaling_config {
+    desired_size = var.node_group_desired_size
+    max_size     = var.node_group_max_size
+    min_size     = var.node_group_min_size
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_node_group_AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.eks_node_group_AmazonEKS_CNI_Policy,
+    aws_iam_role_policy_attachment.eks_node_group_AmazonEC2ContainerRegistryReadOnly
+  ]
 }

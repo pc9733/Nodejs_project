@@ -8,6 +8,7 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: practice-node-app
+  EKS_CLUSTER_NAME: practice-node-app
 
 jobs:
   build-and-deploy:
@@ -61,12 +62,8 @@ jobs:
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
 
-      - name: Configure kubeconfig
-        env:
-          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
-        run: |
-          mkdir -p ~/.kube
-          echo "$KUBE_CONFIG_DATA" | base64 --decode > ~/.kube/config
+      - name: Configure kubeconfig for EKS
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
       - name: Deploy manifests
         env:
