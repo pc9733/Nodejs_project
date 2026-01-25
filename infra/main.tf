@@ -74,6 +74,13 @@ resource "aws_ecr_repository" "practice_node_app" {
   tags = {
     Name = "practice-node-app"
   }
+
+  lifecycle {
+    ignore_changes = [
+      image_tag_mutability,
+      image_scanning_configuration
+    ]
+  }
 }
 
 resource "aws_iam_role" "eks_cluster" {
@@ -140,6 +147,10 @@ resource "aws_iam_role" "eks_node_group" {
       }
     ]
   })
+
+  lifecycle {
+    ignore_changes = [tags]
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "eks_node_group_AmazonEKSWorkerNodePolicy" {

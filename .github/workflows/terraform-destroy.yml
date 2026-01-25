@@ -1,18 +1,15 @@
-name: Terraform Apply
+name: Terraform Destroy
 
 on:
+  schedule:
+    - cron: "30 18 * * *" # 12:00 AM IST
   workflow_dispatch:
-    inputs:
-      auto_approve:
-        description: "Apply latest Terraform configuration"
-        required: false
-        default: "true"
 
 env:
   AWS_REGION: us-east-1
 
 jobs:
-  apply:
+  destroy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,10 +31,6 @@ jobs:
         working-directory: infra
         run: terraform init
 
-      - name: Terraform validate
+      - name: Terraform destroy
         working-directory: infra
-        run: terraform validate
-
-      - name: Terraform apply
-        working-directory: infra
-        run: terraform apply -auto-approve
+        run: terraform destroy -auto-approve
