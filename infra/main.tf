@@ -76,7 +76,9 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "${var.cluster_name}-public-${count.index + 1}"
+    Name                                        = "${var.cluster_name}-public-${count.index + 1}"
+    "kubernetes.io/role/elb"                    = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -264,6 +266,7 @@ resource "helm_release" "aws_load_balancer_controller" {
   repository = "https://aws.github.io/eks-charts"
   chart      = "aws-load-balancer-controller"
   namespace  = "kube-system"
+  version    = "1.10.0"
 
   values = [
     yamlencode({
@@ -272,8 +275,10 @@ resource "helm_release" "aws_load_balancer_controller" {
         create = false
         name   = kubernetes_service_account_v1.alb_controller.metadata[0].name
       }
-      region = var.aws_region
-      vpcId  = aws_vpc.eks.id
+      region       = var.aws_region
+      vpcId        = aws_vpc.eks.id
+      enableShield = true
+      enableWaf    = true
     })
   ]
 
