@@ -29,10 +29,10 @@ jobs:
     outputs:
       cluster_name:
         description: "EKS cluster name"
-        value: ${{ steps.apply.outputs.cluster_name }}
+        value: ${{ steps.outputs.outputs.cluster_name }}
       ecr_repository:
         description: "ECR repository URL"
-        value: ${{ steps.apply.outputs.ecr_repository }}
+        value: ${{ steps.outputs.outputs.ecr_repository }}
 
     steps:
       - name: Checkout repository
@@ -76,6 +76,17 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
             terraform apply -auto-approve tfplan
+            
+            # Output cluster information
+            CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "")
+            ECR_REPO=$(terraform output -raw ecr_repository_url 2>/dev/null || echo "")
+            
+            echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+            echo "ecr_repository=$ECR_REPO" >> $GITHUB_OUTPUT
+            
+            echo "✅ Terraform applied successfully!"
+            echo "📊 Cluster: $CLUSTER_NAME"
+            echo "📦 ECR Repository: $ECR_REPO"
           else
             echo "⚠️ Auto-approve disabled. Please review the plan above and manually apply if needed."
             echo "To apply manually, run: cd infra/environments/${{ github.event.inputs.environment }} && terraform apply tfplan"
@@ -84,23 +95,16 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "")
+          CLUSTER_NAME="${{ steps.apply.outputs.cluster_name }}"
           if [ -n "$CLUSTER_NAME" ]; then
             aws eks update-kubeconfig --name $CLUSTER_NAME --region ${{ env.AWS_REGION }}
             echo "✅ kubectl configured for cluster: $CLUSTER_NAME"
           fi
         working-directory: infra/environments/${{ github.event.inputs.environment }}
 
-      - name: Get outputs
-        id: outputs
-        working-directory: infra/environments/${{ github.event.inputs.environment }}
-        run: |
-          echo "cluster_name=$(terraform output -raw cluster_name 2>/dev/null || echo "")" >> $GITHUB_OUTPUT
-          echo "ecr_repository=$(terraform output -raw ecr_repository_url 2>/dev/null || echo "")" >> $GITHUB_OUTPUT
-
       - name: Verify cluster access
         run: |
-          CLUSTER_NAME="${{ steps.outputs.outputs.cluster_name }}"
+          CLUSTER_NAME="${{ steps.apply.outputs.cluster_name }}"
           if [ -n "$CLUSTER_NAME" ]; then
             kubectl get nodes || echo "⚠️ Could not connect to cluster"
             kubectl get namespaces || echo "⚠️ Could not list namespaces"
@@ -111,11 +115,11 @@ jobs:
           echo "## 🎉 Terraform Apply Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Cluster:** ${{ steps.outputs.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**ECR Repository:** ${{ steps.outputs.outputs.ecr_repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster:** ${{ steps.apply.outputs.cluster_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**ECR Repository:** ${{ steps.apply.outputs.ecr_repository }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🚀 Next Steps" >> $GITHUB_STEP_SUMMARY
           echo "1. Deploy application using the appropriate workflow:" >> $GITHUB_STEP_SUMMARY
           echo "   - Development: \`deploy-dev.yml\`" >> $GITHUB_STEP_SUMMARY
           echo "   - Production: \`deploy-prod.yml\`" >> $GITHUB_STEP_SUMMARY
-          echo "2. Configure kubectl: \`aws eks update-kubeconfig --name ${{ steps.outputs.outputs.cluster_name }} --region ${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. Configure kubectl: \`aws eks update-kubeconfig --name ${{ steps.apply.outputs.cluster_name }} --region ${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
