@@ -2,19 +2,7 @@
 
 Complete infrastructure-as-code solution for deploying a Node.js application on Amazon EKS with automated CI/CD.
 
-## 📁 Repository Structure
-
-```
-├── infra/                    # Terraform AWS infrastructure
-├── k8s/                      # Kubernetes manifests
-│   ├── environments/         # Environment-specific configs
-│   ├── *.yaml               # Core application files
-│   └── *.yml                # Advanced examples
-├── node-app/                 # Node.js application source
-└── .github/workflows/        # CI/CD pipelines
-```
-
-## 🚀 Quick Start
+## � Quick Start
 
 ### 1. Infrastructure Setup
 ```bash
@@ -39,7 +27,24 @@ kubectl apply -f k8s/namespace.yaml \
 kubectl get ingress practice-node-app -n practice-app
 ```
 
-## 🏗️ Infrastructure Components
+## �📁 Repository Structure
+
+```
+├── infra/                    # Terraform AWS infrastructure
+├── k8s/                      # Kubernetes manifests
+│   ├── environments/         # Environment-specific configs
+│   ├── *.yaml               # Core application files
+│   └── *.yml                # Advanced examples
+├── node-app/                 # Node.js application source
+├── .github/workflows/        # CI/CD pipelines
+└── docs/                     # Detailed documentation
+    ├── INFRASTRUCTURE.md     # AWS infrastructure details
+    ├── KUBERNETES.md         # Kubernetes manifests guide
+    ├── CICD.md              # CI/CD pipeline documentation
+    └── TROUBLESHOOTING.md    # Common issues and solutions
+```
+
+## 🏗️ Architecture Overview
 
 **AWS Resources (Terraform):**
 - ✅ VPC, subnets, internet gateway
@@ -57,17 +62,14 @@ kubectl get ingress practice-node-app -n practice-app
 
 ## 🔄 CI/CD Pipeline
 
-### Main Workflow (`deploy-node-app.yml`)
-**Triggers:** Manual, push to main, PRs
-
-**Features:**
+**Main Workflow Features:**
 - 🔍 **Security:** Trivy vulnerability scanning
 - 🚀 **Deployment:** Multi-environment support
 - 🛡️ **Safety:** Automatic rollback on failure
 - 📊 **Monitoring:** Health checks + performance testing
 - 🧹 **Cleanup:** Automated ECR image management
 
-### Canary Deployments (`canary-deploy.yml`)
+**Canary Deployments:**
 - 🎯 **Traffic Splitting:** Configurable percentage (1-50%)
 - 📈 **Monitoring:** Health verification and metrics
 - 🔄 **Control:** Promote or rollback decisions
@@ -105,46 +107,12 @@ kubectl scale deployment practice-node-app --replicas=3 -n practice-app
 kubectl port-forward service/practice-node-app 3000:80 -n practice-app
 ```
 
-## 📋 Advanced Deployment Options
+## � Documentation
 
-### Environment-Specific
-```bash
-# Staging
-kubectl apply -f k8s/environments/staging/
-
-# Production  
-kubectl apply -f k8s/environments/production/
-```
-
-### Advanced Features
-```bash
-# With ConfigMaps and Secrets
-kubectl apply -f k8s/configmaps.yml
-kubectl apply -f k8s/service-discovery.yml
-
-# Production-ready with autoscaling
-kubectl apply -f k8s/advanced-k8s.yml
-```
-
-## 🔧 Troubleshooting
-
-### Common Issues
-- **ImagePullBackOff:** Run GitHub Actions workflow or build/push manually
-- **Pending pods:** Check resource requests vs node capacity  
-- **ALB issues:** Verify AWS Load Balancer Controller logs
-- **Terraform state:** Use `./auto-destroy.sh` instead of `terraform destroy`
-
-### Debug Commands
-```bash
-# Check ECR images
-aws ecr list-images --repository-name practice-node-app
-
-# Check ALB status
-kubectl get ingress practice-node-app -n practice-app -o wide
-
-# Terraform state issues
-terraform force-unlock <LOCK_ID>  # If state locked
-```
+- **[Infrastructure Guide](docs/INFRASTRUCTURE.md)** - AWS infrastructure details
+- **[Kubernetes Guide](docs/KUBERNETES.md)** - Application manifests and examples
+- **[CI/CD Documentation](docs/CICD.md)** - Pipeline configuration and usage
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ## 💰 Cost Optimization
 
@@ -158,13 +126,6 @@ terraform force-unlock <LOCK_ID>  # If state locked
 - **Remote State:** Encrypted S3 with DynamoDB locking
 - **Vulnerability Scanning:** Trivy integration in CI/CD
 - **Network Policies:** Pod-level traffic control
-
-## 📖 Documentation
-
-- **Terraform:** `infra/` - AWS infrastructure definitions
-- **Kubernetes:** `k8s/` - Application manifests and examples
-- **CI/CD:** `.github/workflows/` - Automated deployment pipelines
-- **Application:** `node-app/` - Node.js source code
 
 ---
 
