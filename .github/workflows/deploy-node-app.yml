@@ -1,11 +1,15 @@
-name: Node App CI/CD
+name: Legacy Deploy (Single Environment)
 
 on:
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (leave empty for latest)'
+        required: false
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 env:
   AWS_REGION: us-east-1
@@ -21,9 +25,7 @@ jobs:
       actions: read
       security-events: write
       pull-requests: write
-    outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      alb-url: ${{ steps.deploy.outputs.alb-url }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -41,8 +43,7 @@ jobs:
 
       - name: Run tests
         working-directory: node-app
-        run: |
-          npm test || echo "No tests configured, skipping..."
+        run: npm test || echo "No tests configured, skipping..."
 
       - name: Run smoke test
         working-directory: node-app
@@ -101,36 +102,14 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig for EKS
+      - name: Update kubeconfig
         run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
-
-      - name: Save previous deployment
-        id: backup
-        run: |
-          if kubectl get deployment practice-node-app -n practice-app 2>/dev/null; then
-            # Get current revision for potential rollback
-            CURRENT_REVISION=$(kubectl rollout history deployment/practice-node-app -n practice-app --revision=1 --no-headers | head -1 | awk '{print $1}' || echo "1")
-            echo "current-revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
-            
-            # Save deployment spec
-            kubectl get deployment practice-node-app -n practice-app -o yaml > previous-deployment.yaml
-            echo "backup-saved=true" >> $GITHUB_OUTPUT
-            echo "✅ Backup saved, current revision: $CURRENT_REVISION"
-          else
-            echo "backup-saved=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No existing deployment found"
-          fi
 
       - name: Verify image in ECR
         run: |
-          echo "🔍 Verifying image exists in ECR..."
           IMAGE_TAG="latest"
           FULL_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
           
-          # Check if image exists
           if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
             echo "✅ Image $FULL_IMAGE found in ECR"
           else
@@ -140,10 +119,14 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy manifests
+      - name: Deploy manifests (Legacy)
         id: deploy
         run: |
-          # Deploy all manifests in k8s/ directory
+          echo "⚠️ LEGACY WARNING: This is the old single-environment deployment."
+          echo "🔄 For new modular setup, use:"
+          echo "   - deploy-dev.yml (for development)"
+          echo "   - deploy-prod.yml (for production)"
+          echo ""
           echo "🚀 Deploying all Kubernetes manifests..."
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/
@@ -156,7 +139,7 @@ jobs:
           ALB_URL=$(kubectl get ingress practice-node-app -n practice-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
           echo "alb-url=$ALB_URL" >> $GITHUB_OUTPUT
           
-          echo "✅ All manifests deployed and image updated!"
+          echo "✅ Legacy deployment completed!"
 
       - name: Clean up failed deployment
         if: failure() && steps.backup.outputs.backup-saved == 'true'

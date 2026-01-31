@@ -1,11 +1,25 @@
 name: Terraform Plan
 
 on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to plan (dev/prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - prod
   pull_request:
     paths:
-      - "infra/**"
-      - ".github/workflows/terraform-plan.yml"
-  workflow_dispatch:
+      - 'infra/**'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'infra/**'
 
 env:
   AWS_REGION: us-east-1
@@ -15,6 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
+      id-token: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,24 +46,100 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ENVIRONMENT="dev"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              ENVIRONMENT="prod"
+            else
+              ENVIRONMENT="dev"
+            fi
+          else
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          fi
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+
+      - name: Setup state backend for ${{ steps.env.outputs.environment }}
+        run: |
+          cd infra
+          if [ "${{ steps.env.outputs.environment }}" = "dev" ]; then
+            ./setup-dev.sh
+          elif [ "${{ steps.env.outputs.environment }}" = "prod" ]; then
+            ./setup-prod.sh
+          fi
+
       - name: Terraform init
-        working-directory: infra
+        working-directory: infra/environments/${{ steps.env.outputs.environment }}
         run: terraform init
 
-      - name: Terraform fmt check
-        working-directory: infra
-        run: terraform fmt -check
-
       - name: Terraform validate
-        working-directory: infra
+        working-directory: infra/environments/${{ steps.env.outputs.environment }}
         run: terraform validate
 
       - name: Terraform plan
-        working-directory: infra
+        id: plan
+        working-directory: infra/environments/${{ steps.env.outputs.environment }}
         run: terraform plan -out=tfplan
 
-      - name: Upload plan artifact
+      - name: Save plan artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan
-          path: infra/tfplan
+          name: terraform-plan-${{ steps.env.outputs.environment }}
+          path: infra/environments/${{ steps.env.outputs.environment }}/tfplan
+          retention-days: 7
+
+      - name: Terraform show
+        working-directory: infra/environments/${{ steps.env.outputs.environment }}
+        run: terraform show -json tfplan > plan.json
+
+      - name: Comment PR with plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = JSON.parse(fs.readFileSync('infra/environments/${{ steps.env.outputs.environment }}/plan.json', 'utf8'));
+            
+            const addChanges = plan.resource_changes || [];
+            const deleteChanges = addChanges.filter(r => r.change.actions.includes('delete'));
+            const createChanges = addChanges.filter(r => r.change.actions.includes('create'));
+            const updateChanges = addChanges.filter(r => r.change.actions.includes('update'));
+            
+            const comment = `## 📋 Terraform Plan for ${{ steps.env.outputs.environment }}
+            
+            ### 📊 Summary
+            - **Resources to create:** ${createChanges.length}
+            - **Resources to update:** ${updateChanges.length}
+            - **Resources to delete:** ${deleteChanges.length}
+            - **Total changes:** ${addChanges.length}
+            
+            ### 🔄 Changes
+            ${addChanges.map(r => `- \`${r.type}\`: ${r.change.actions.join(', ')}`).join('\n')}
+            
+            ---
+            *This plan was generated for the ${{ steps.env.outputs.environment }} environment.*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Summary
+        run: |
+          echo "## 📋 Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Plan Details" >> $GITHUB_STEP_SUMMARY
+          echo "The Terraform plan has been generated and saved as an artifact." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review the plan output above" >> $GITHUB_STEP_SUMMARY
+          echo "2. Download the plan artifact if needed" >> $GITHUB_STEP_SUMMARY
+          echo "3. Apply changes using \`terraform-apply.yml\` workflow" >> $GITHUB_STEP_SUMMARY

@@ -1,9 +1,20 @@
 name: Terraform Destroy
 
 on:
-  schedule:
-    - cron: "30 18 * * *" # 12:00 AM IST
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy (dev/prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - prod
+      confirm_destroy:
+        description: 'Type "destroy" to confirm destruction'
+        required: true
+        default: 'cancel'
 
 env:
   AWS_REGION: us-east-1
@@ -13,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,14 +40,58 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Confirm destruction
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "destroy" ]; then
+            echo " Destruction not confirmed. Type 'destroy' to confirm."
+            exit 1
+          fi
+          
+          if [ "${{ github.event.inputs.environment }}" = "prod" ]; then
+            echo " WARNING: You are about to destroy the PRODUCTION environment!"
+            echo "This action cannot be undone."
+            echo "Type 'destroy-production' to confirm:"
+            read -r prod_confirmation
+            if [ "$prod_confirmation" != "destroy-production" ]; then
+              echo " Production destruction cancelled."
+              exit 1
+            fi
+          fi
+
       - name: Terraform init
-        working-directory: infra
+        working-directory: infra/environments/${{ github.event.inputs.environment }}
         run: terraform init
 
-      - name: Make destroy script executable
-        working-directory: infra
-        run: chmod +x auto-destroy.sh
+      - name: Terraform destroy
+        working-directory: infra/environments/${{ github.event.inputs.environment }}
+        run: terraform destroy -auto-approve
 
-      - name: Automated destroy (preserves IAM resources)
-        working-directory: infra
-        run: ./auto-destroy.sh
+      - name: Clean up state management
+        run: |
+          cd infra
+          if [ "${{ github.event.inputs.environment }}" = "dev" ]; then
+            aws s3 rb "s3://practice-node-app-terraform-state-dev" --force || true
+            aws dynamodb delete-table --table-name practice-node-app-terraform-locks-dev --region ${{ env.AWS_REGION }} || true
+          elif [ "${{ github.event.inputs.environment }}" = "prod" ]; then
+            aws s3 rb "s3://practice-node-app-terraform-state-prod" --force || true
+            aws dynamodb delete-table --table-name practice-node-app-terraform-locks-prod --region ${{ env.AWS_REGION }} || true
+          fi
+
+      - name: Summary
+        run: |
+          echo "## 🔥 Terraform Destroy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Destroyed Resources" >> $GITHUB_STEP_SUMMARY
+          echo "- EKS Cluster" >> $GITHUB_STEP_SUMMARY
+          echo "- Node Groups" >> $GITHUB_STEP_SUMMARY
+          echo "- VPC and Networking" >> $GITHUB_STEP_SUMMARY
+          echo "- ECR Repository" >> $GITHUB_STEP_SUMMARY
+          echo "- Terraform State Backend" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "To recreate the environment:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Run \`terraform-apply.yml\` workflow" >> $GITHUB_STEP_SUMMARY
+          echo "2. Or use local scripts: \`./setup-${{ github.event.inputs.environment }}.sh && ./apply-${{ github.event.inputs.environment }}.sh\`" >> $GITHUB_STEP_SUMMARY
