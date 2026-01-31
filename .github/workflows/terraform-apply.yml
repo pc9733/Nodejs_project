@@ -29,10 +29,10 @@ jobs:
     outputs:
       cluster_name:
         description: "EKS cluster name"
-        value: ${{ steps.outputs.outputs.cluster_name }}
+        value: ${{ steps.apply.outputs.cluster_name }}
       ecr_repository:
         description: "ECR repository URL"
-        value: ${{ steps.outputs.outputs.ecr_repository }}
+        value: ${{ steps.apply.outputs.ecr_repository }}
 
     steps:
       - name: Checkout repository
