@@ -32,7 +32,7 @@ jobs:
         value: ${{ steps.apply.outputs.cluster_name }}
       ecr_repository:
         description: "ECR repository URL"
-        value: ${{ steps.apply.outputs.ecr_repository }}
+        value: ${{ steps.apply.outputs.ecr_repository }}}
 
     steps:
       - name: Checkout repository
