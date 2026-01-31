@@ -21,19 +21,19 @@ data "tls_certificate" "eks" {
   url = aws_eks_cluster.practice.identity[0].oidc[0].issuer
 }
 
-// provider "kubernetes" {
-//   host                   = data.aws_eks_cluster.practice.endpoint
-//   cluster_ca_certificate = base64decode(data.aws_eks_cluster.practice.certificate_authority[0].data)
-//   token                  = data.aws_eks_cluster_auth.practice.token
-// }
+provider "kubernetes" {
+  host                   = data.aws_eks_cluster.practice.endpoint
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.practice.certificate_authority[0].data)
+  token                  = data.aws_eks_cluster_auth.practice.token
+}
 
-// provider "helm" {
-//   kubernetes = {
-//     host                   = data.aws_eks_cluster.practice.endpoint
-//     cluster_ca_certificate = base64decode(data.aws_eks_cluster.practice.certificate_authority[0].data)
-//     token                  = data.aws_eks_cluster_auth.practice.token
-//   }
-// }
+provider "helm" {
+  kubernetes = {
+    host                   = data.aws_eks_cluster.practice.endpoint
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.practice.certificate_authority[0].data)
+    token                  = data.aws_eks_cluster_auth.practice.token
+  }
+}
 data "aws_availability_zones" "available" {
   state = "available"
 }
@@ -261,44 +261,44 @@ resource "aws_iam_role_policy_attachment" "alb_controller" {
   role       = aws_iam_role.alb_controller.name
 }
 
-// resource "kubernetes_service_account_v1" "alb_controller" {
-//   metadata {
-//     name      = "aws-load-balancer-controller"
-//     namespace = "kube-system"
-//     labels = {
-//       "app.kubernetes.io/name" = "aws-load-balancer-controller"
-//     }
-//     annotations = {
-//       "eks.amazonaws.com/role-arn" = aws_iam_role.alb_controller.arn
-//     }
-//   }
-// }
+resource "kubernetes_service_account_v1" "alb_controller" {
+  metadata {
+    name      = "aws-load-balancer-controller"
+    namespace = "kube-system"
+    labels = {
+      "app.kubernetes.io/name" = "aws-load-balancer-controller"
+    }
+    annotations = {
+      "eks.amazonaws.com/role-arn" = aws_iam_role.alb_controller.arn
+    }
+  }
+}
 
-// resource "helm_release" "aws_load_balancer_controller" {
-//   name       = "aws-load-balancer-controller"
-//   repository = "https://aws.github.io/eks-charts"
-//   chart      = "aws-load-balancer-controller"
-//   namespace  = "kube-system"
-//   version    = "1.10.0"
+resource "helm_release" "aws_load_balancer_controller" {
+  name       = "aws-load-balancer-controller"
+  repository = "https://aws.github.io/eks-charts"
+  chart      = "aws-load-balancer-controller"
+  namespace  = "kube-system"
+  version    = "1.10.0"
 
-//   values = [
-//     yamlencode({
-//       clusterName = aws_eks_cluster.practice.name
-//       serviceAccount = {
-//         create = false
-//         name   = kubernetes_service_account_v1.alb_controller.metadata[0].name
-//       }
-//       region       = var.aws_region
-//       vpcId        = aws_vpc.eks.id
-//       enableShield = true
-//       enableWaf    = true
-//     })
-//   ]
+  values = [
+    yamlencode({
+      clusterName = aws_eks_cluster.practice.name
+      serviceAccount = {
+        create = false
+        name   = kubernetes_service_account_v1.alb_controller.metadata[0].name
+      }
+      region       = var.aws_region
+      vpcId        = aws_vpc.eks.id
+      enableShield = true
+      enableWaf    = true
+    })
+  ]
 
-//   depends_on = [
-//     kubernetes_service_account_v1.alb_controller
-//   ]
-// }
+  depends_on = [
+    kubernetes_service_account_v1.alb_controller
+  ]
+}
 // Managed node group that provisions EC2 worker nodes of the desired size.
 resource "aws_eks_node_group" "default" {
   cluster_name    = aws_eks_cluster.practice.name

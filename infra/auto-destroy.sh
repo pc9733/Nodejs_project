@@ -5,7 +5,19 @@ set -e
 echo "🔥 Automated infrastructure cleanup..."
 
 # Remove from Terraform state (preserves IAM resources)
-terraform state rm aws_eks_cluster.practice aws_eks_node_group.default aws_iam_openid_connect_provider.eks aws_route_table_association.public aws_route_table.public aws_internet_gateway.eks aws_subnet.public aws_vpc.eks aws_ecr_repository.practice_node_app aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy aws_iam_role_policy_attachment.eks_cluster_AmazonEKSVPCResourceController aws_iam_role_policy_attachment.eks_node_group_AmazonEKSWorkerNodePolicy aws_iam_role_policy_attachment.eks_node_group_AmazonEKS_CNI_Policy aws_iam_role_policy_attachment.eks_node_group_AmazonEC2ContainerRegistryReadOnly aws_iam_role_policy_attachment.alb_controller 2>/dev/null || true
+terraform state rm aws_eks_cluster.practice aws_eks_node_group.default aws_iam_openid_connect_provider.eks aws_route_table_association.public aws_route_table.public aws_internet_gateway.eks aws_subnet.public aws_vpc.eks aws_ecr_repository.practice_node_app aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy aws_iam_role_policy_attachment.eks_cluster_AmazonEKSVPCResourceController aws_iam_role_policy_attachment.eks_node_group_AmazonEKSWorkerNodePolicy aws_iam_role_policy_attachment.eks_node_group_AmazonEKS_CNI_Policy aws_iam_role_policy_attachment.eks_node_group_AmazonEC2ContainerRegistryReadOnly aws_iam_role_policy_attachment.alb_controller kubernetes_service_account_v1.alb_controller helm_release.aws_load_balancer_controller 2>/dev/null || true
+
+# Delete Kubernetes resources first (if cluster exists)
+if aws eks describe-cluster --name practice-node-app --region us-east-1 2>/dev/null; then
+    echo "🗑️  Deleting Kubernetes resources..."
+    aws eks update-kubeconfig --name practice-node-app --region us-east-1 2>/dev/null || true
+    kubectl delete ingress practice-node-app -n practice-app 2>/dev/null || true
+    kubectl delete service practice-node-app -n practice-app 2>/dev/null || true
+    kubectl delete deployment practice-node-app -n practice-app 2>/dev/null || true
+    kubectl delete namespace practice-app 2>/dev/null || true
+    kubectl delete serviceaccount aws-load-balancer-controller -n kube-system 2>/dev/null || true
+    helm uninstall aws-load-balancer-controller -n kube-system 2>/dev/null || true
+fi
 
 # Delete EKS resources
 aws eks delete-nodegroup --cluster-name practice-node-app --nodegroup-name practice-node-app-node-group --region us-east-1 2>/dev/null || true
