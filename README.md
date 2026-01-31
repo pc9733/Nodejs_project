@@ -218,6 +218,138 @@ kubectl scale deployment practice-node-app --replicas=3 -n practice-app
 - `Pending` ALB: Check AWS Load Balancer Controller logs in `kube-system` namespace
 - Pod failures: Use `kubectl describe pod <pod-name> -n practice-app` for debugging
 
+## GitHub Actions CI/CD
+
+This repository includes comprehensive CI/CD workflows for automated building, testing, and deployment.
+
+### **Main CI/CD Pipeline** (`.github/workflows/deploy-node-app.yml`)
+
+**Triggers:**
+- Manual workflow dispatch
+- Push to `main` branch
+- Pull requests to `main` branch
+
+**Features:**
+- ✅ **Automated builds** with Docker layer caching
+- ✅ **Vulnerability scanning** with Trivy
+- ✅ **Multi-environment deployment** (staging/production)
+- ✅ **Rollback capability** on deployment failure
+- ✅ **Health checks** and ALB verification
+- ✅ **Performance testing** with k6 load testing
+- ✅ **Automated cleanup** of old ECR images
+- ✅ **Deployment notifications** and status reporting
+
+**Deployment Strategy:**
+- **Pull Requests**: Deploy core manifests only
+- **Main Branch**: Full deployment with ConfigMaps and advanced features
+- **All Deployments**: Include ingress, health checks, and rollback protection
+
+### **Canary Deployments** (`.github/workflows/canary-deploy.yml`)
+
+**Features:**
+- ✅ **Traffic splitting** (configurable percentage)
+- ✅ **Canary monitoring** and health verification
+- ✅ **Promote/Rollback** decisions
+- ✅ **Zero-downtime** deployments
+
+**Usage:**
+1. Trigger canary workflow with desired traffic percentage
+2. Monitor canary performance
+3. Promote to main or rollback as needed
+
+### **Environment-Specific Deployments**
+
+**Staging Environment:**
+- Namespace: `practice-app-staging`
+- 1 replica, minimal resources
+- No external ingress (internal only)
+
+**Production Environment:**
+- Namespace: `practice-app-prod`
+- 3 replicas, higher resource allocation
+- Full ALB ingress with internet-facing access
+
+### **CI/CD Workflow Steps**
+
+1. **Code Quality & Testing**
+   - Node.js setup and dependency installation
+   - Automated test execution
+   - Smoke test validation
+
+2. **Build & Security**
+   - Docker image building with caching
+   - ECR registry push with metadata tags
+   - Trivy vulnerability scanning
+   - SARIF report upload to GitHub
+
+3. **Deployment**
+   - Kubernetes manifest application
+   - Environment-specific configuration
+   - Image updates with proper tagging
+   - Rollback verification
+
+4. **Verification & Monitoring**
+   - Rollout status monitoring
+   - Health check validation
+   - ALB endpoint testing
+   - Performance testing with k6
+
+5. **Cleanup & Notification**
+   - Old ECR image cleanup (keep last 5)
+   - Deployment success notifications
+   - Failure alerts and rollback
+
+### **Manual Deployment Options**
+
+**Quick Deploy:**
+```bash
+# Deploy core application
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/ingress.yaml
+kubectl apply -f k8s/deployment.yaml
+```
+
+**Environment-Specific:**
+```bash
+# Staging
+kubectl apply -f k8s/environments/staging/
+
+# Production
+kubectl apply -f k8s/environments/production/
+```
+
+**Advanced Features:**
+```bash
+# With ConfigMaps and Secrets
+kubectl apply -f k8s/configmaps.yml
+kubectl apply -f k8s/service-discovery.yml
+
+# Production-ready with autoscaling
+kubectl apply -f k8s/advanced-k8s.yml
+```
+
+### **Troubleshooting CI/CD**
+
+**Common Issues:**
+- **Build Failures**: Check Dockerfile and dependencies
+- **ECR Push Issues**: Verify AWS credentials and permissions
+- **Deployment Failures**: Check Kubernetes manifests and resource limits
+- **Health Check Failures**: Verify application `/health` endpoint
+- **ALB Issues**: Check AWS Load Balancer Controller logs
+
+**Debug Commands:**
+```bash
+# Check workflow logs in GitHub Actions
+# Verify ECR images
+aws ecr list-images --repository-name practice-node-app
+
+# Check Kubernetes resources
+kubectl get all -n practice-app
+kubectl describe deployment practice-node-app -n practice-app
+kubectl logs -f deployment/practice-node-app -n practice-app
+```
+
 ## End-to-End Flow
 1. Commit application or infra changes.
 2. Terraform plan/apply workflows provision/modify the AWS stack.
