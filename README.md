@@ -108,6 +108,435 @@ Verify ALB provisioning with `kubectl get ingress practice-node-app -n practice-
 - ✅ Automated cleanup in correct dependency order
 - ✅ Consistent behavior between local and CI/CD environments
 
+## Kubernetes Practice Exercises
+
+This section contains hands-on Kubernetes exercises for learning and practice. All exercises are designed to work with the existing EKS cluster and Node.js application.
+
+### 🚀 Exercise 1: Basic Pod Troubleshooting
+
+**File**: `k8s/debug.yaml` (create your own)
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-pod
+spec:
+  containers:
+  - name: debug-container
+    image: alpine
+    command: ['sleep', '3600']
+```
+
+**Commands**:
+```bash
+# Create and check pod
+kubectl apply -f k8s/debug.yaml
+kubectl get pods
+
+# Debug inside pod
+kubectl exec -it debug-pod -- sh
+kubectl describe pod debug-pod
+kubectl logs debug-pod
+
+# Clean up
+kubectl delete pod debug-pod
+```
+
+**Learning**: Basic pod operations, shell access, troubleshooting
+
+---
+
+### ⚙️ Exercise 2: ConfigMaps for Configuration
+
+**File**: `k8s/configmaps.yml`
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: practice-app-config
+  namespace: practice-app
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+  API_VERSION: "v1"
+  DB_HOST: "practice-db.example.com"
+  DB_PORT: "5432"
+  REDIS_URL: "redis://practice-redis:6379"
+```
+
+**Commands**:
+```bash
+# Apply ConfigMap and deployment
+kubectl apply -f k8s/configmaps.yml
+
+# Check environment variables in pod
+kubectl exec -it <pod-name> -n practice-app -- env | grep -E "(NODE_ENV|PORT|LOG_LEVEL)"
+
+# Update ConfigMap
+kubectl patch configmap practice-app-config -n practice-app -p '{"data":{"LOG_LEVEL":"debug"}}'
+
+# Restart deployment to pick up changes
+kubectl rollout restart deployment practice-node-app-config -n practice-app
+
+# Verify updated values
+kubectl exec -it <new-pod-name> -n practice-app -- env | grep LOG_LEVEL
+```
+
+**Learning**: Configuration management, environment variable injection, ConfigMap updates
+
+---
+
+### 🔗 Exercise 3: Service Discovery
+
+**File**: `k8s/service-discovery.yml`
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client-pod
+  namespace: practice-app
+spec:
+  containers:
+  - name: curl
+    image: curlimages/curl
+    command: ['sleep', '3600']
+```
+
+**Commands**:
+```bash
+# Apply client pod
+kubectl apply -f k8s/service-discovery.yml
+
+# Test service discovery
+kubectl exec -it client-pod -n practice-app -- curl http://practice-node-app/health
+kubectl exec -it client-pod -n practice-app -- curl http://practice-node-app-enhanced/health
+
+# Check DNS resolution
+kubectl exec -it client-pod -n practice-app -- nslookup practice-node-app
+```
+
+**Learning**: Internal Kubernetes networking, service discovery, DNS resolution
+
+---
+
+### 🔐 Exercise 4: Secrets Management
+
+**File**: Part of `k8s/service-discovery.yml`
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: practice-app-secrets
+  namespace: practice-app
+type: Opaque
+data:
+  DB_PASSWORD: cGFzc3dvcmQxMjM=  # base64 encoded "password123"
+  API_KEY: YXBpa2V5c2VjcmV0MTIz  # base64 encoded "apikeysecret123"
+```
+
+**Commands**:
+```bash
+# Create secret manually
+echo -n "password123" | base64
+echo -n "apikeysecret123" | base64
+
+# Apply and verify
+kubectl apply -f k8s/service-discovery.yml
+kubectl get secret practice-app-secrets -n practice-app -o yaml
+
+# Check environment variables in pod
+kubectl exec -it <pod-name> -n practice-app -- env | grep -E "(DB_PASSWORD|API_KEY)"
+```
+
+**Learning**: Secret creation, base64 encoding, secure environment variable injection
+
+---
+
+### 📊 Exercise 5: Resource Limits & Health Probes
+
+**File**: Part of `k8s/service-discovery.yml`
+```yaml
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
+
+**Commands**:
+```bash
+# Apply enhanced deployment
+kubectl apply -f k8s/service-discovery.yml
+
+# Check resource allocation
+kubectl describe pod <pod-name> -n practice-app | grep -A 10 "Requests\|Limits"
+
+# Monitor health probes
+kubectl describe pod <pod-name> -n practice-app | grep -A 5 "Liveness\|Readiness"
+
+# Test resource pressure (if metrics server available)
+kubectl top pods -n practice-app
+```
+
+**Learning**: Resource management, health monitoring, probe configuration
+
+---
+
+### 🛡️ Exercise 6: Network Policies
+
+**File**: Part of `k8s/advanced-k8s.yml`
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: practice-app-netpol
+  namespace: practice-app
+spec:
+  podSelector:
+    matchLabels:
+      app: practice-node-app-enhanced
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: client-pod
+    ports:
+    - protocol: TCP
+      port: 3000
+```
+
+**Commands**:
+```bash
+# Apply network policy
+kubectl apply -f k8s/advanced-k8s.yml
+
+# Test allowed traffic
+kubectl exec -it client-pod -n practice-app -- curl http://practice-node-app-enhanced/health
+
+# Test blocked traffic (create unauthorized pod)
+kubectl run unauthorized --image=curlimages/curl --rm -it --restart=Never -- curl http://practice-node-app-enhanced/health
+
+# Check network policy
+kubectl describe networkpolicy practice-app-netpol -n practice-app
+```
+
+**Learning**: Network security, traffic control, policy enforcement
+
+---
+
+### 📈 Exercise 7: Horizontal Pod Autoscaling
+
+**File**: Part of `k8s/advanced-k8s.yml`
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: practice-app-hpa
+  namespace: practice-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: practice-node-app-enhanced
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+```
+
+**Commands**:
+```bash
+# Apply HPA
+kubectl apply -f k8s/advanced-k8s.yml
+
+# Check HPA status
+kubectl get hpa -n practice-app
+kubectl describe hpa practice-app-hpa -n practice-app
+
+# Generate load for testing
+kubectl apply -f k8s/advanced-k8s.yml  # includes load-tester pod
+
+# Monitor scaling events
+kubectl get pods -n practice-app -w
+kubectl describe hpa practice-app-hpa -n practice-app
+```
+
+**Learning**: Auto-scaling configuration, load testing, scaling events
+
+---
+
+### 🗄️ Exercise 8: Persistent Storage
+
+**File**: Part of `k8s/advanced-k8s.yml`
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: practice-app-pvc
+  namespace: practice-app
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: gp2
+```
+
+**Commands**:
+```bash
+# Apply PVC
+kubectl apply -f k8s/advanced-k8s.yml
+
+# Check PVC status
+kubectl get pvc -n practice-app
+kubectl describe pvc practice-app-pvc -n practice-app
+
+# Check volume mounting in pod
+kubectl describe pod <pod-name> -n practice-app | grep -A 5 "Mounts\|Volumes"
+```
+
+**Learning**: Persistent storage, volume claims, storage classes
+
+---
+
+### 🚀 Exercise 9: Init Containers & Startup Probes
+
+**File**: Part of `k8s/advanced-k8s.yml`
+```yaml
+spec:
+  initContainers:
+  - name: init-db
+    image: busybox:1.35
+    command: ['sh', '-c', 'echo "Initializing database..." && sleep 5']
+  - name: init-cache
+    image: busybox:1.35
+    command: ['sh', '-c', 'echo "Warming up cache..." && sleep 3']
+  containers:
+  - name: node-app
+    startupProbe:
+      httpGet:
+        path: /health
+        port: 3000
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      failureThreshold: 6
+```
+
+**Commands**:
+```bash
+# Apply advanced deployment
+kubectl apply -f k8s/advanced-k8s.yml
+
+# Watch init container logs
+kubectl logs <pod-name> -n practice-app -c init-db
+kubectl logs <pod-name> -n practice-app -c init-cache
+
+# Check startup probe status
+kubectl describe pod <pod-name> -n practice-app | grep -A 5 "Startup"
+```
+
+**Learning**: Initialization sequences, startup probes, multi-container patterns
+
+---
+
+## 🧪 Important Commands Reference
+
+### **Pod Management**
+```bash
+kubectl get pods -n practice-app
+kubectl describe pod <pod-name> -n practice-app
+kubectl logs <pod-name> -n practice-app
+kubectl exec -it <pod-name> -n practice-app -- sh
+kubectl delete pod <pod-name> -n practice-app
+```
+
+### **Configuration**
+```bash
+kubectl get configmap -n practice-app
+kubectl describe configmap <name> -n practice-app
+kubectl get secret -n practice-app
+kubectl describe secret <name> -n practice-app
+```
+
+### **Services & Networking**
+```bash
+kubectl get svc -n practice-app
+kubectl describe svc <service-name> -n practice-app
+kubectl get networkpolicy -n practice-app
+kubectl describe networkpolicy <policy-name> -n practice-app
+```
+
+### **Scaling & Resources**
+```bash
+kubectl get hpa -n practice-app
+kubectl describe hpa <hpa-name> -n practice-app
+kubectl top pods -n practice-app  # if metrics server installed
+kubectl describe pod <pod-name> -n practice-app | grep -A 10 "Resources"
+```
+
+### **Storage**
+```bash
+kubectl get pvc -n practice-app
+kubectl describe pvc <pvc-name> -n practice-app
+kubectl get pv
+```
+
+### **Deployment Management**
+```bash
+kubectl get deployment -n practice-app
+kubectl describe deployment <deployment-name> -n practice-app
+kubectl rollout status deployment/<deployment-name> -n practice-app
+kubectl rollout restart deployment/<deployment-name> -n practice-app
+kubectl rollout history deployment/<deployment-name> -n practice-app
+```
+
+### **Troubleshooting**
+```bash
+kubectl get events -n practice-app --sort-by=.metadata.creationTimestamp
+kubectl get all -n practice-app
+kubectl explain <resource-type>
+kubectl api-resources | grep <resource>
+```
+
+## 🎯 Learning Outcomes
+
+After completing these exercises, you'll have mastered:
+- ✅ **Pod lifecycle management** and troubleshooting
+- ✅ **Configuration management** with ConfigMaps and Secrets
+- ✅ **Service discovery** and internal networking
+- ✅ **Resource management** and health monitoring
+- ✅ **Network security** with policies
+- ✅ **Auto-scaling** based on resource usage
+- ✅ **Persistent storage** for stateful applications
+- ✅ **Advanced deployment patterns** with init containers
+- ✅ **Production-ready** Kubernetes configurations
+
+These exercises cover the essential Kubernetes skills needed for real-world deployments and production environments.
+
 ## Application Deployment Prerequisites
 ⚠️ **Important**: Before deploying the application, ensure:
 - ECR repository exists (created by Terraform)

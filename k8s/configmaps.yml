@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: practice-app-config
+  namespace: practice-app
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+  API_VERSION: "v1"
+  DB_HOST: "practice-db.example.com"
+  DB_PORT: "5432"
+  REDIS_URL: "redis://practice-redis:6379"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: practice-node-app-config
+  namespace: practice-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: practice-node-app-config
+  template:
+    metadata:
+      labels:
+        app: practice-node-app-config
+    spec:
+      containers:
+      - name: node-app
+        image: 852994641319.dkr.ecr.us-east-1.amazonaws.com/practice-node-app:5685d74e8c934b06211295ee907ea22b8df4224d
+        ports:
+        - containerPort: 3000
+        envFrom:
+        - configMapRef:
+            name: practice-app-config

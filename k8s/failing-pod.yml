@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Pod
-metadata:
-  name: failing-pod
-spec:
-  containers:
-  - name: bad-container
-    image: nonexistent-image-12345
-    command: ['sleep', '3600']
