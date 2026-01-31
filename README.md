@@ -92,7 +92,21 @@ Verify ALB provisioning with `kubectl get ingress practice-node-app -n practice-
 ## GitHub Actions
 1. **deploy-node-app.yml** – Builds the Docker image, logs into ECR, pushes the new tag, updates the Kubernetes deployment, and rolls out changes.
 2. **Terraform Plan/Apply workflows** – Run Terraform in GitHub-hosted runners. Separate jobs perform plan (for review) and apply (after approval). AWS credentials are passed through encrypted secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc.).
-3. **terraform-destroy.yml** – Scheduled workflow that runs `terraform destroy` nightly (cron for 12 AM IST) to keep AWS usage low.
+3. **terraform-destroy.yml** – **Updated**: Scheduled workflow that runs `./auto-destroy.sh` nightly (cron for 12 AM IST) to keep AWS usage low while preserving IAM resources to avoid import issues.
+
+### GitHub Actions Destroy Workflow
+⚠️ **Important**: The destroy workflow has been updated to use `./auto-destroy.sh` instead of `terraform destroy` to prevent failures:
+
+```yaml
+- name: Automated destroy (preserves IAM resources)
+  run: ./auto-destroy.sh
+```
+
+**Benefits:**
+- ✅ No more "Instance cannot be destroyed" errors
+- ✅ Preserves IAM roles/policies for reuse
+- ✅ Automated cleanup in correct dependency order
+- ✅ Consistent behavior between local and CI/CD environments
 
 ## End-to-End Flow
 1. Commit application or infra changes.

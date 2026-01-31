@@ -31,6 +31,10 @@ jobs:
         working-directory: infra
         run: terraform init
 
-      - name: Terraform destroy
+      - name: Make destroy script executable
         working-directory: infra
-        run: terraform destroy -auto-approve
+        run: chmod +x auto-destroy.sh
+
+      - name: Automated destroy (preserves IAM resources)
+        working-directory: infra
+        run: ./auto-destroy.sh
