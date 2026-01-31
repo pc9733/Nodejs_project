@@ -254,12 +254,12 @@ jobs:
           if [ -n "$ALB_URL" ]; then
             echo "🚀 Running performance test against $ALB_URL"
             
-            # Install k6 using official method
-            sudo gpg -k
-            sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkps://keys.openpgp.org --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
-            echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
-            sudo apt-get update
-            sudo apt-get install k6
+            # Install k6 using direct download
+            K6_VERSION="v0.55.0"
+            curl -L -o k6.tar.gz "https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-amd64.tar.gz"
+            tar -xzf k6.tar.gz
+            sudo mv k6-${K6_VERSION}-linux-amd64/k6 /usr/local/bin/
+            k6 version
             
             # Create k6 script with actual ALB URL using echo
             echo 'import http from "k6/http";' > load-test.js
