@@ -143,28 +143,19 @@ jobs:
       - name: Deploy manifests
         id: deploy
         run: |
-          # Deploy core infrastructure
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/service.yaml
-          kubectl apply -f k8s/ingress.yaml
+          # Deploy all manifests in k8s/ directory
+          echo "🚀 Deploying all Kubernetes manifests..."
+          kubectl apply -f k8s/
           
-          # Deploy environment-specific configs
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            kubectl apply -f k8s/configmaps.yml
-            kubectl apply -f k8s/service-discovery.yml
-          fi
-          
-          # Deploy or update main application
-          if kubectl get deployment practice-node-app -n practice-app 2>/dev/null; then
-            kubectl set image deployment/practice-node-app node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app
-          else
-            kubectl apply -f k8s/deployment.yaml
-            kubectl set image deployment/practice-node-app node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app
-          fi
+          # Update deployment with latest image
+          echo "🔄 Updating deployment image..."
+          kubectl set image deployment/practice-node-app node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app
           
           # Get ALB URL for output
           ALB_URL=$(kubectl get ingress practice-node-app -n practice-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
           echo "alb-url=$ALB_URL" >> $GITHUB_OUTPUT
+          
+          echo "✅ All manifests deployed and image updated!"
 
       - name: Clean up failed deployment
         if: failure() && steps.backup.outputs.backup-saved == 'true'
