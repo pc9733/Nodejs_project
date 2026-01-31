@@ -257,31 +257,29 @@ jobs:
             # Install k6
             sudo apt-get update && sudo apt-get install -y k6
             
-            # Create k6 script with actual ALB URL
-            cat > load-test.js <<EOF
-            import http from 'k6/http';
-            import { check } from 'k6';
-            
-            export let options = {
-              stages: [
-                { duration: '1m', target: 5 },
-                { duration: '1m', target: 5 },
-                { duration: '1m', target: 0 },
-              ],
-              thresholds: {
-                http_req_duration: ['p(95)<500'],
-                http_req_failed: ['rate<0.1'],
-              },
-            };
-            
-            export default function () {
-              let response = http.get('http://$ALB_URL/health');
-              check(response, {
-                'status was 200': (r) => r.status == 200,
-                'response time < 500ms': (r) => r.timings.duration < 500,
-              });
-            }
-EOF
+            # Create k6 script with actual ALB URL using echo
+            echo 'import http from "k6/http";' > load-test.js
+            echo 'import { check } from "k6";' >> load-test.js
+            echo '' >> load-test.js
+            echo 'export let options = {' >> load-test.js
+            echo '  stages: [' >> load-test.js
+            echo '    { duration: "1m", target: 5 },' >> load-test.js
+            echo '    { duration: "1m", target: 5 },' >> load-test.js
+            echo '    { duration: "1m", target: 0 },' >> load-test.js
+            echo '  ],' >> load-test.js
+            echo '  thresholds: {' >> load-test.js
+            echo '    http_req_duration: ["p(95)<500"],' >> load-test.js
+            echo '    http_req_failed: ["rate<0.1"],' >> load-test.js
+            echo '  },' >> load-test.js
+            echo '};' >> load-test.js
+            echo '' >> load-test.js
+            echo 'export default function () {' >> load-test.js
+            echo "  let response = http.get('http://$ALB_URL/health');" >> load-test.js
+            echo '  check(response, {' >> load-test.js
+            echo '    "status was 200": (r) => r.status == 200,' >> load-test.js
+            echo '    "response time < 500ms": (r) => r.timings.duration < 500,' >> load-test.js
+            echo '  });' >> load-test.js
+            echo '}' >> load-test.js
             
             # Run load test
             k6 run --out json=load-test-results.js load-test.js
