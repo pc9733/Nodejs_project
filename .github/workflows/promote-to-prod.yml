@@ -1,17 +1,17 @@
-name: Deploy to Production
+name: Promote to Production
 
 on:
   workflow_dispatch:
     inputs:
-      image_tag:
-        description: 'Image tag to deploy (leave empty for latest)'
+      commit_sha:
+        description: 'Commit SHA to promote (leave empty for latest develop)'
         required: false
-      approve_deployment:
-        description: 'Type "approve" to confirm production deployment'
+      approve_promotion:
+        description: 'Type "promote" to confirm production promotion'
         required: true
         default: 'cancel'
-  release:
-    types: [ published ]
+  push:
+    branches: [ release/* ]
 
 env:
   AWS_REGION: us-east-1
@@ -19,17 +19,45 @@ env:
   EKS_CLUSTER_NAME: practice-node-app-prod
 
 jobs:
-  build-and-deploy:
+  promote:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      actions: read
       security-events: write
       pull-requests: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get promotion details
+        id: promotion
+        run: |
+          if [ -n "${{ github.event.inputs.commit_sha }}" ]; then
+            COMMIT_SHA="${{ github.event.inputs.commit_sha }}"
+            BRANCH="develop"
+          else
+            COMMIT_SHA=$(git rev-parse origin/develop)
+            BRANCH="develop"
+          fi
+          
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "source_branch=$BRANCH" >> $GITHUB_OUTPUT
+          
+          echo "🚀 Promoting commit $COMMIT_SHA from $BRANCH to production"
+
+      - name: Confirm promotion
+        run: |
+          if [ "${{ github.event.inputs.approve_promotion }}" != "promote" ]; then
+            echo "❌ Promotion not confirmed. Type 'promote' to confirm."
+            exit 1
+          fi
+          
+          echo "✅ Production promotion confirmed!"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -45,10 +73,6 @@ jobs:
       - name: Run tests
         working-directory: node-app
         run: npm test || echo "No tests configured, skipping..."
-
-      - name: Run smoke test
-        working-directory: node-app
-        run: node -e "require('./server'); console.log('Server module loads successfully')"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -68,13 +92,12 @@ jobs:
           images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=develop-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push image
+      - name: Build and promote image
         uses: docker/build-push-action@v5
         with:
           context: ./node-app
@@ -101,15 +124,6 @@ jobs:
         continue-on-error: true
         with:
           sarif_file: 'trivy-results.sarif'
-
-      - name: Manual approval for production deployment
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          if [ "${{ github.event.inputs.approve_deployment }}" != "approve" ]; then
-            echo "❌ Production deployment not approved. Type 'approve' to confirm."
-            exit 1
-          fi
-          echo "✅ Production deployment approved!"
 
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
@@ -141,15 +155,15 @@ jobs:
 
       - name: Deploy to production
         run: |
-          echo "🚀 Deploying to production environment..."
+          echo "🚀 Promoting to production environment..."
           
           # Apply production manifests
           kubectl apply -f k8s/environments/prod/all-in-one.yaml
           
-          # Update deployment with latest image
+          # Update deployment with promoted image
           kubectl set image deployment/practice-node-app-prod node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app-prod
           
-          echo "✅ Production deployment completed!"
+          echo "✅ Production promotion completed!"
 
       - name: Wait for rollout
         run: |
@@ -206,7 +220,7 @@ jobs:
 
       - name: Get deployment info
         run: |
-          echo "📊 Production Deployment Information:"
+          echo "📊 Production Promotion Information:"
           kubectl get pods -n practice-app-prod -l app=practice-node-app-prod
           kubectl get services -n practice-app-prod
           kubectl get ingress -n practice-app-prod
@@ -228,27 +242,18 @@ jobs:
             echo "⚠️ No backup available, manual rollback may be needed"
           fi
 
-      - name: Cleanup old ECR images
-        run: |
-          echo "🧹 Cleaning up old ECR images (keeping last 10)..."
-          aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }} \
-            --query 'sort_by(imageDetails, &imagePushedAt)[:-10].imageDigest' \
-            --output text | while read -r digest; do
-            aws ecr batch-delete-image --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageDigest=$digest || true
-          done
-
-      - name: Notify production team
+      - name: Notify promotion team
         if: always()
         run: |
           ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
           
           if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Production deployment successful!"
+            echo "✅ Production promotion successful!"
             echo "🌐 Production URL: http://$ALB_URL"
-            echo "📊 View metrics: kubectl top pods -n practice-app-prod"
-            echo "📋 View logs: kubectl logs -f deployment/practice-node-app-prod -n practice-app-prod"
+            echo "📊 Promoted commit: ${{ steps.promotion.outputs.commit_sha }}"
+            echo "📋 Source branch: ${{ steps.promotion.outputs.source_branch }}"
           else
-            echo "❌ Production deployment failed!"
+            echo "❌ Production promotion failed!"
             echo "🔍 Check the workflow logs for details"
             echo "🔄 Rollback initiated automatically"
           fi

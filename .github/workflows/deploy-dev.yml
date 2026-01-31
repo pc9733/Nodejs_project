@@ -9,7 +9,8 @@ on:
   push:
     branches: [ develop, feature/*, hotfix/* ]
   pull_request:
-    branches: [ main ]
+    branches: [ develop ]
+    types: [ opened, synchronize, reopened ]
 
 env:
   AWS_REGION: us-east-1
