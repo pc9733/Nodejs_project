@@ -1,8 +1,25 @@
 #!/bin/bash
+# =================================================================
+# LEGACY AUTO-DESTROY (Old Single Environment)
+# Use destroy-dev.sh or destroy-prod.sh for new modular setup
+# =================================================================
 
 set -e
 
-echo "🔥 Automated infrastructure cleanup..."
+echo "⚠️  LEGACY WARNING: This is the old single-environment destroy script."
+echo "🔄 For new modular setup, use:"
+echo "   - ./destroy-dev.sh (for development)"
+echo "   - ./destroy-prod.sh (for production)"
+echo "   - ./destroy-all.sh (for both)"
+echo ""
+echo "� Type 'legacy-destroy' to continue with old method:"
+read -r confirmation
+if [ "$confirmation" != "legacy-destroy" ]; then
+    echo "❌ Legacy destroy cancelled. Please use the new scripts."
+    exit 1
+fi
+
+echo "🔥 Running legacy infrastructure cleanup..."
 
 # Remove from Terraform state (preserves IAM resources)
 terraform state rm aws_eks_cluster.practice aws_eks_node_group.default aws_iam_openid_connect_provider.eks aws_route_table_association.public aws_route_table.public aws_internet_gateway.eks aws_subnet.public aws_vpc.eks aws_ecr_repository.practice_node_app aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy aws_iam_role_policy_attachment.eks_cluster_AmazonEKSVPCResourceController aws_iam_role_policy_attachment.eks_node_group_AmazonEKSWorkerNodePolicy aws_iam_role_policy_attachment.eks_node_group_AmazonEKS_CNI_Policy aws_iam_role_policy_attachment.eks_node_group_AmazonEC2ContainerRegistryReadOnly aws_iam_role_policy_attachment.alb_controller kubernetes_service_account_v1.alb_controller helm_release.aws_load_balancer_controller 2>/dev/null || true
@@ -26,7 +43,13 @@ aws eks wait nodegroup-deleted --cluster-name practice-node-app --nodegroup-name
 
 aws eks delete-cluster --name practice-node-app --region us-east-1 2>/dev/null || true
 echo "⏳ Waiting for cluster deletion..."
-aws eks wait cluster-deleted --name practice-node-app --region us-east-1 2>/dev/null || true
+aws eks wait cluster-deleted --cluster-name practice-node-app --region us-east-1 2>/dev/null || true
+
+# Destroy remaining infrastructure
+terraform destroy -auto-approve
+
+echo "✅ Legacy infrastructure destroyed successfully!"
+echo "💡 Consider migrating to the new modular setup for better environment management."
 
 # Delete VPC resources
 VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=practice-node-app-vpc" --query "Vpcs[0].VpcId" --output text --region us-east-1 2>/dev/null || echo "")
