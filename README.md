@@ -17,14 +17,61 @@ This repository provisions and deploys a sample Node.js application onto an Amaz
 5. **EKS + Node Group** – `aws_eks_cluster.practice` and `aws_eks_node_group.default` form the control plane and worker nodes, sized through variables.
 6. **AWS Load Balancer Controller** – Terraform creates the service account, attaches the IAM policy from `iam-policy-alb.json`, then installs the Helm chart to automatically manage ALBs for ingress objects.
 
-### Working with Terraform
+## Working with Terraform
+
+### Initial Setup (One-time)
 ```bash
 cd infra
+# Setup remote state backend to prevent state loss
+./setup-remote-state.sh
+
+# Initialize Terraform with remote backend
 terraform init
+```
+
+### Daily Workflow
+```bash
+cd infra
 terraform plan          # review changes
 terraform apply         # create/update resources
-terraform destroy       # tear everything down
 ```
+
+### Safe Destroy Workflow
+⚠️ **Important**: Use the automated destroy script to preserve IAM resources and avoid import issues:
+
+```bash
+cd infra
+./auto-destroy.sh       # Safe automated cleanup (preserves IAM)
+```
+
+**Why use `auto-destroy.sh` instead of `terraform destroy`?**
+- Preserves IAM roles/policies to avoid "resource already exists" errors
+- Uses remote state backend to prevent state loss
+- Automated cleanup of all resources in correct dependency order
+- No manual imports required after destruction
+
+### Manual Destroy (Not Recommended)
+```bash
+terraform destroy       # Will fail due to IAM resource protection
+```
+
+### State Management
+- **Remote Backend**: State is stored in S3 with DynamoDB locking
+- **IAM Protection**: Critical IAM resources have `prevent_destroy = true`
+- **Recovery**: If state is lost, IAM resources are preserved in AWS
+
+### Troubleshooting State Issues
+- If you accidentally delete IAM resources, re-import them:
+  ```bash
+  terraform import aws_iam_role.eks_cluster practice-node-app-cluster-role
+  terraform import aws_iam_role.eks_node_group practice-node-app-node-role
+  terraform import aws_iam_policy.alb_controller arn:aws:iam::852994641319:policy/practice-node-app-alb-controller-policy
+  terraform import aws_eks_cluster.practice practice-node-app
+  terraform import aws_eks_node_group.default practice-node-app:practice-node-app-node-group
+  terraform import aws_iam_openid_connect_provider.eks arn:aws:iam::852994641319:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/[CLUSTER_ID]
+  terraform import aws_iam_role.alb_controller practice-node-app-alb-controller
+  ```
+
 The nightly destroy GitHub Action can be disabled if persistent environments are needed. After any Terraform change, re-run `terraform plan` to update `.terraform.lock.hcl` so the provider versions stay in sync.
 
 ## Kubernetes Manifests (`k8s/`)
@@ -58,5 +105,19 @@ Verify ALB provisioning with `kubectl get ingress practice-node-app -n practice-
 - If Terraform complains about lock-file mismatches, rerun `terraform init -upgrade`.
 - When the ingress lacks an address, inspect controller logs: `kubectl -n kube-system logs deploy/aws-load-balancer-controller`.
 - Use `aws eks update-kubeconfig --name practice-node-app --region <region>` after cluster creation to interact with kubectl locally.
+- **Resource Already Exists Errors**: Use `./auto-destroy.sh` instead of `terraform destroy` to prevent IAM resource conflicts.
+- **State Lock Issues**: If Terraform is stuck with a state lock, wait a few minutes or use `terraform force-unlock <LOCK_ID>`.
+- **Remote State Issues**: Ensure S3 bucket and DynamoDB table exist by running `./setup-remote-state.sh`.
+
+## Cost Optimization
+- **Automated Cleanup**: Use `./auto-destroy.sh` to remove all resources when not in use.
+- **IAM Preservation**: Critical IAM resources are protected and reused, reducing setup time.
+- **Nightly Destroy**: GitHub Actions automatically destroy resources at 12 AM IST to minimize costs.
+
+## Security Best Practices
+- **IAM Role Protection**: `prevent_destroy = true` prevents accidental deletion of critical IAM resources.
+- **Remote State Encryption**: S3 bucket is encrypted with versioning enabled.
+- **State Locking**: DynamoDB table prevents concurrent state modifications.
+- **Least Privilege**: IAM roles use AWS managed policies with minimal required permissions.
 
 With these pieces working together, you can reproducibly create, deploy, and tear down the entire environment from source control.
