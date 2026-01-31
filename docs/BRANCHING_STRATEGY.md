@@ -37,13 +37,12 @@ main                    # Production-ready code
 ### **Production Environment (`deploy-prod.yml`)**
 
 **Triggers:**
-- ✅ **Manual**: Workflow dispatch (with approval)
-- ✅ **Auto**: GitHub releases
+- ✅ **Manual ONLY**: Workflow dispatch (with approval)
 
 **Purpose:**
 - Production deployments
-- Release management
 - Manual control and safety
+- No automatic triggers
 
 **Environment:**
 - **Cluster**: `practice-node-app-prod`
@@ -53,21 +52,30 @@ main                    # Production-ready code
 ### **Production Promotion (`promote-to-prod.yml`)**
 
 **Triggers:**
-- ✅ **Manual**: Workflow dispatch (with approval)
-- ✅ **Auto**: Push to `release/*` branches
+- ✅ **Manual ONLY**: Workflow dispatch (with approval)
 
 **Purpose:**
 - Promote tested code from develop to production
 - Controlled release process
 - Rollback capabilities
 
+**Environment:**
+- **Cluster**: `practice-node-app-prod`
+- **Repository**: `practice-node-app-prod`
+- **Namespace**: `practice-app-prod`
+
 ## 🛡️ Safety Controls
 
 ### **Production Safety**
 ```yaml
-# Manual approval required
+# Manual approval required - NO AUTOMATION
 approve_deployment:
-  description: 'Type "approve" to confirm production deployment'
+  description: 'Type "deploy-production" to confirm production deployment'
+  required: true
+  default: 'cancel'
+
+approve_promotion:
+  description: 'Type "promote-production" to confirm production promotion'
   required: true
   default: 'cancel'
 ```
@@ -83,15 +91,17 @@ terraform-apply.yml: # Manual with environment selection
 
 ### **`main` Branch**
 - **Purpose**: Production-ready code
-- **Protection**: ❌ No auto-deployment
-- **Access**: Pull requests only
-- **Triggers**: Manual production deployment
+- **Protection**: ❌ NO auto-deployment, NO direct push
+- **Access**: Pull requests only from develop/hotfix
+- **Triggers**: Manual production deployment ONLY
+- **Safety**: Branch protection required
 
 ### **`develop` Branch**
 - **Purpose**: Integration and staging
 - **Auto-deployment**: ✅ Development environment
 - **Source**: For production promotion
 - **Protection**: Pull requests required
+- **Target**: For main branch merges
 
 ### **`feature/*` Branches**
 - **Purpose**: Feature development
@@ -104,12 +114,14 @@ terraform-apply.yml: # Manual with environment selection
 - **Auto-deployment**: ✅ Development environment
 - **Target**: Merge to both `develop` and `main`
 - **Priority**: Immediate attention required
+- **Production**: Manual deployment after testing
 
 ### **`release/*` Branches**
-- **Purpose**: Release preparation
-- **Auto-promotion**: ✅ To production (with approval)
-- **Lifecycle**: Tag and merge to `main`
-- **Naming**: `release/v1.2.0`
+- **Purpose**: Release preparation (DEPRECATED)
+- **Auto-promotion**: ❌ NO automation
+- **Lifecycle**: Use promote-to-prod.yml instead
+- **Naming**: No longer used
+- **Alternative**: Manual promotion workflow
 
 ## 🚀 Deployment Workflow
 
@@ -124,23 +136,22 @@ terraform-apply.yml: # Manual with environment selection
 
 ### **Production Release**
 ```bash
-# Option A: Manual Promotion
-1. Ensure develop is stable
-2. Run promote-to-prod.yml workflow
-3. Approve promotion
-4. Deploy to production
+# ONLY Manual Process
+1. Ensure develop is stable and tested
+2. Run promote-to-prod.yml workflow manually
+3. Type "promote-production" to confirm
+4. Deploy to production with full testing
 
-# Option B: Release Branch
-1. Create release branch: git checkout -b release/v1.2.0 develop
-2. Finalize release
-3. Push to release/* → Auto-promote to production
-4. Tag and merge to main
+# OR Direct Production Deploy
+1. Run deploy-prod.yml workflow manually
+2. Type "deploy-production" to confirm
+3. Deploy to production with full testing
 ```
 
 ### **Emergency Hotfix**
 ```bash
 1. Create hotfix from main: git checkout -b hotfix/critical-fix main
-2. Fix issue and test
+2. Fix issue and test locally
 3. Push to hotfix/* → Auto-deploy to dev
 4. Create PR to main and develop
 5. Merge to both → Manual production deployment
@@ -154,19 +165,20 @@ terraform-apply.yml: # Manual with environment selection
 | `develop` | ✅ Auto | ❌ Manual | ✅ Auto | ❌ No | ✅ Manual |
 | `feature/*` | ✅ Auto | ❌ Manual | ✅ Auto | ❌ No | ❌ No |
 | `hotfix/*` | ✅ Auto | ❌ Manual | ✅ Auto | ✅ Manual | ✅ Manual |
-| `release/*` | ✅ Auto | ❌ Manual | ✅ Auto | ✅ Auto | ✅ Auto |
+| `release/*` | ❌ Deprecated | ❌ Deprecated | ❌ Deprecated | ❌ Deprecated | ❌ Deprecated |
 
 ## 📊 Environment Comparison
 
 | Feature | Development | Production |
 |---------|-------------|-------------|
-| **Branch** | `develop`, `feature/*` | `main`, `release/*` |
-| **Deployment** | Automatic | Manual/Approved |
+| **Branch** | `develop`, `feature/*` | `main` ONLY |
+| **Deployment** | Automatic | Manual ONLY |
 | **Replicas** | 1 | 3 |
 | **Resources** | Minimal | High |
 | **Monitoring** | Basic | Advanced |
 | **Security** | Basic | Enhanced |
 | **Testing** | Unit/Smoke | Full + Performance |
+| **Approval** | None | Manual Confirmation |
 
 ## 🔄 CI/CD Pipeline Flow
 

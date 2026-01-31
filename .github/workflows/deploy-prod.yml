@@ -7,11 +7,9 @@ on:
         description: 'Image tag to deploy (leave empty for latest)'
         required: false
       approve_deployment:
-        description: 'Type "approve" to confirm production deployment'
+        description: 'Type "deploy-production" to confirm production deployment'
         required: true
         default: 'cancel'
-  release:
-    types: [ published ]
 
 env:
   AWS_REGION: us-east-1
@@ -103,10 +101,9 @@ jobs:
           sarif_file: 'trivy-results.sarif'
 
       - name: Manual approval for production deployment
-        if: github.event_name == 'workflow_dispatch'
         run: |
-          if [ "${{ github.event.inputs.approve_deployment }}" != "approve" ]; then
-            echo "❌ Production deployment not approved. Type 'approve' to confirm."
+          if [ "${{ github.event.inputs.approve_deployment }}" != "deploy-production" ]; then
+            echo "❌ Production deployment not approved. Type 'deploy-production' to confirm."
             exit 1
           fi
           echo "✅ Production deployment approved!"
