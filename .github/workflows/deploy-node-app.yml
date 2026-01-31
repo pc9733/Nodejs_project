@@ -258,7 +258,7 @@ jobs:
             sudo apt-get update && sudo apt-get install -y k6
             
             # Create k6 script with actual ALB URL
-            cat > load-test.js << EOF
+            cat > load-test.js <<EOF
             import http from 'k6/http';
             import { check } from 'k6';
             
@@ -281,7 +281,7 @@ jobs:
                 'response time < 500ms': (r) => r.timings.duration < 500,
               });
             }
-            EOF
+EOF
             
             # Run load test
             k6 run --out json=load-test-results.js load-test.js
