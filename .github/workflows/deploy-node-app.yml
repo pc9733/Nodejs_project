@@ -111,10 +111,17 @@ jobs:
         id: backup
         run: |
           if kubectl get deployment practice-node-app -n practice-app 2>/dev/null; then
+            # Get current revision for potential rollback
+            CURRENT_REVISION=$(kubectl rollout history deployment/practice-node-app -n practice-app --revision=1 --no-headers | head -1 | awk '{print $1}' || echo "1")
+            echo "current-revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
+            
+            # Save deployment spec
             kubectl get deployment practice-node-app -n practice-app -o yaml > previous-deployment.yaml
             echo "backup-saved=true" >> $GITHUB_OUTPUT
+            echo "✅ Backup saved, current revision: $CURRENT_REVISION"
           else
             echo "backup-saved=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No existing deployment found"
           fi
 
       - name: Deploy manifests
@@ -143,9 +150,31 @@ jobs:
           ALB_URL=$(kubectl get ingress practice-node-app -n practice-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
           echo "alb-url=$ALB_URL" >> $GITHUB_OUTPUT
 
+      - name: Debug deployment issues
+        if: failure()
+        run: |
+          echo "🔍 Debugging deployment issues..."
+          echo "=== Pod Status ==="
+          kubectl get pods -n practice-app -l app=practice-node-app -o wide
+          echo ""
+          echo "=== Pod Events ==="
+          kubectl get events -n practice-app --sort-by='.lastTimestamp' | tail -10
+          echo ""
+          echo "=== Deployment Status ==="
+          kubectl describe deployment practice-node-app -n practice-app
+          echo ""
+          echo "=== Resource Usage ==="
+          kubectl top nodes 2>/dev/null || echo "Metrics server not available"
+          kubectl top pods -n practice-app 2>/dev/null || echo "Pod metrics not available"
+
       - name: Wait for rollout
         run: |
-          kubectl rollout status deployment/practice-node-app -n practice-app --timeout=300s
+          kubectl rollout status deployment/practice-node-app -n practice-app --timeout=600s || {
+            echo "Rollout taking longer than expected, checking pod status..."
+            kubectl get pods -n practice-app -l app=practice-node-app
+            kubectl describe deployment practice-node-app -n practice-app
+            exit 1
+          }
 
       - name: Health check
         run: |
@@ -171,9 +200,19 @@ jobs:
         run: |
           if [ "${{ steps.backup.outputs.backup-saved }}" = "true" ]; then
             echo "🔄 Deployment failed, rolling back..."
-            kubectl apply -f previous-deployment.yaml
-            kubectl rollout status deployment/practice-node-app -n practice-app --timeout=300s
-            echo "✅ Rollback completed"
+            
+            # Try to rollback using kubectl rollback first
+            if kubectl rollout undo deployment/practice-node-app -n practice-app; then
+              echo "✅ Rollback completed using kubectl rollout undo"
+              kubectl rollout status deployment/practice-node-app -n practice-app --timeout=300s
+            else
+              echo "⚠️ Rollback undo failed, trying to apply backup..."
+              # Fallback to applying backup file
+              kubectl apply -f previous-deployment.yaml --force || true
+              kubectl rollout status deployment/practice-node-app -n practice-app --timeout=300s || true
+            fi
+          else
+            echo "⚠️ No backup available, manual rollback may be needed"
           fi
 
       - name: Performance test
