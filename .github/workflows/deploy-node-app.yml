@@ -145,6 +145,7 @@ jobs:
         run: |
           # Deploy all manifests in k8s/ directory
           echo "🚀 Deploying all Kubernetes manifests..."
+          kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/
           
           # Update deployment with latest image
