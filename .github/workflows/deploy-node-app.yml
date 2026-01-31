@@ -124,6 +124,22 @@ jobs:
             echo "ℹ️ No existing deployment found"
           fi
 
+      - name: Verify image in ECR
+        run: |
+          echo "🔍 Verifying image exists in ECR..."
+          IMAGE_TAG="latest"
+          FULL_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
+          
+          # Check if image exists
+          if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            echo "✅ Image $FULL_IMAGE found in ECR"
+          else
+            echo "❌ Image $FULL_IMAGE not found in ECR"
+            echo "Available images:"
+            aws ecr list-images --repository-name ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }} --query 'imageIds[].imageTag' --output table
+            exit 1
+          fi
+
       - name: Deploy manifests
         id: deploy
         run: |
@@ -140,15 +156,31 @@ jobs:
           
           # Deploy or update main application
           if kubectl get deployment practice-node-app -n practice-app 2>/dev/null; then
-            kubectl set image deployment/practice-node-app node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} -n practice-app
+            kubectl set image deployment/practice-node-app node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app
           else
             kubectl apply -f k8s/deployment.yaml
-            kubectl set image deployment/practice-node-app node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} -n practice-app
+            kubectl set image deployment/practice-node-app node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app
           fi
           
           # Get ALB URL for output
           ALB_URL=$(kubectl get ingress practice-node-app -n practice-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
           echo "alb-url=$ALB_URL" >> $GITHUB_OUTPUT
+
+      - name: Clean up failed deployment
+        if: failure() && steps.backup.outputs.backup-saved == 'true'
+        run: |
+          echo "🧹 Cleaning up failed deployment..."
+          
+          # Reset deployment to stable state
+          kubectl rollout undo deployment/practice-node-app -n practice-app || true
+          
+          # Wait for cleanup to complete
+          kubectl rollout status deployment/practice-node-app -n practice-app --timeout=300s || true
+          
+          # Remove any stuck pods
+          kubectl delete pods -n practice-app -l app=practice-node-app --field-selector=status.phase=Failed --ignore-not-found=true || true
+          
+          echo "✅ Cleanup completed"
 
       - name: Debug deployment issues
         if: failure()
