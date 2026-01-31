@@ -1,3 +1,14 @@
+# =================================================================
+# SERVICE DISCOVERY & SECRETS CONFIGURATION
+# 
+# This file contains multiple Kubernetes resources:
+# 1. Client Pod - For testing service connectivity
+# 2. Enhanced Deployment - Advanced deployment with resource limits and secrets
+# 3. Service - ClusterIP service for the enhanced deployment
+# 4. Secrets - Sensitive configuration data (DB_PASSWORD, API_KEY)
+# =================================================================
+
+---
 apiVersion: v1
 kind: Pod
 metadata:
@@ -80,6 +91,12 @@ spec:
     targetPort: 3000
   type: ClusterIP
 ---
+# =================================================================
+# KUBERNETES SECRETS
+# Contains sensitive data for the application
+# - DB_PASSWORD: Database connection password
+# - API_KEY: External API authentication key
+# =================================================================
 apiVersion: v1
 kind: Secret
 metadata:
