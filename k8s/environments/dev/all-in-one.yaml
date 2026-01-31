@@ -1,0 +1,151 @@
+# =================================================================
+# DEVELOPMENT ENVIRONMENT KUBERNETES MANIFESTS
+# Lightweight configuration for development/testing
+# =================================================================
+
+---
+# Namespace for development
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: practice-app-dev
+  labels:
+    environment: development
+    project: practice-node-app
+
+---
+# Development Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: practice-node-app-dev
+  namespace: practice-app-dev
+  labels:
+    app: practice-node-app-dev
+    environment: development
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: practice-node-app-dev
+  template:
+    metadata:
+      labels:
+        app: practice-node-app-dev
+        environment: development
+    spec:
+      containers:
+      - name: node-app
+        image: 852994641319.dkr.ecr.us-east-1.amazonaws.com/practice-node-app-dev:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "development"
+        - name: PORT
+          value: "3000"
+        - name: LOG_LEVEL
+          value: "debug"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+---
+# Development Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: practice-node-app-dev
+  namespace: practice-app-dev
+  labels:
+    app: practice-node-app-dev
+    environment: development
+spec:
+  selector:
+    app: practice-node-app-dev
+  ports:
+  - port: 80
+    targetPort: 3000
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Development Ingress (Internal Only)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: practice-node-app-dev
+  namespace: practice-app-dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  labels:
+    app: practice-node-app-dev
+    environment: development
+spec:
+  rules:
+  - host: practice-app-dev.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: practice-node-app-dev
+            port:
+              number: 80
+
+---
+# Development ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: practice-app-config-dev
+  namespace: practice-app-dev
+  labels:
+    environment: development
+data:
+  NODE_ENV: "development"
+  LOG_LEVEL: "debug"
+  API_TIMEOUT: "30000"
+  DB_HOST: "localhost"
+  DB_PORT: "5432"
+  REDIS_HOST: "localhost"
+  REDIS_PORT: "6379"
+
+---
+# Development Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: practice-app-secrets-dev
+  namespace: practice-app-dev
+  labels:
+    environment: development
+type: Opaque
+data:
+  DB_PASSWORD: ZGV2LXBhc3N3b3JkMTIz  # base64: "dev-password123"
+  API_KEY: ZGV2LWFwaS1rZXktc2VjcmV0  # base64: "dev-api-key-secret"
+  JWT_SECRET: ZGV2LWp3dC1zZWNyZXQta2V5  # base64: "dev-jwt-secret-key"

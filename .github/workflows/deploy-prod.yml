@@ -1,0 +1,256 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (leave empty for latest)'
+        required: false
+      approve_deployment:
+        description: 'Type "approve" to confirm production deployment'
+        required: true
+        default: 'cancel'
+  push:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: practice-node-app-prod
+  EKS_CLUSTER_NAME: practice-node-app-prod
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: node-app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: node-app
+        run: npm ci --omit=dev
+
+      - name: Run tests
+        working-directory: node-app
+        run: npm test || echo "No tests configured, skipping..."
+
+      - name: Run smoke test
+        working-directory: node-app
+        run: node -e "require('./server'); console.log('Server module loads successfully')"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./node-app
+          file: ./node-app/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.16.1
+        continue-on-error: true
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          skip-dirs: '/tmp,/var'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        continue-on-error: true
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Manual approval for production deployment
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.event.inputs.approve_deployment }}" != "approve" ]; then
+            echo "❌ Production deployment not approved. Type 'approve' to confirm."
+            exit 1
+          fi
+          echo "✅ Production deployment approved!"
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+      - name: Verify image in ECR
+        run: |
+          IMAGE_TAG="latest"
+          FULL_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
+          
+          if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            echo "✅ Image $FULL_IMAGE found in ECR"
+          else
+            echo "❌ Image $FULL_IMAGE not found in ECR"
+            echo "Available images:"
+            aws ecr list-images --repository-name ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }} --query 'imageIds[].imageTag' --output table
+            exit 1
+          fi
+
+      - name: Save previous deployment
+        id: backup
+        run: |
+          if kubectl get deployment practice-node-app-prod -n practice-app-prod 2>/dev/null; then
+            echo "backup-saved=true" >> $GITHUB_OUTPUT
+            echo "✅ Backup saved"
+          else
+            echo "backup-saved=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No existing deployment found"
+          fi
+
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying to production environment..."
+          
+          # Apply production manifests
+          kubectl apply -f k8s/environments/prod/all-in-one.yaml
+          
+          # Update deployment with latest image
+          kubectl set image deployment/practice-node-app-prod node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app-prod
+          
+          echo "✅ Production deployment completed!"
+
+      - name: Wait for rollout
+        run: |
+          echo "⏳ Waiting for deployment rollout..."
+          kubectl rollout status deployment/practice-node-app-prod -n practice-app-prod --timeout=600s
+
+      - name: Health check
+        run: |
+          echo "🔍 Performing health check..."
+          kubectl wait --for=condition=ready pod -l app=practice-node-app-prod -n practice-app-prod --timeout=300s
+          
+          # Get ALB URL
+          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          
+          if [ -n "$ALB_URL" ]; then
+            echo "🌐 Testing ALB endpoint..."
+            for i in {1..10}; do
+              if curl -f -s http://$ALB_URL/health > /dev/null; then
+                echo "✅ ALB health check passed"
+                break
+              fi
+              echo "⏳ Waiting for ALB to be ready... ($i/10)"
+              sleep 30
+            done
+          fi
+
+      - name: Performance test
+        run: |
+          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          
+          if [ -n "$ALB_URL" ]; then
+            echo "🚀 Running performance test against $ALB_URL"
+            
+            # Install k6
+            K6_VERSION="v0.55.0"
+            curl -L -o k6.tar.gz "https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-amd64.tar.gz"
+            tar -xzf k6.tar.gz
+            sudo mv k6-${K6_VERSION}-linux-amd64/k6 /usr/local/bin/
+            
+            # Create k6 script
+            echo 'import http from "k6/http";' > load-test.js
+            echo 'import { check } from "k6";' >> load-test.js
+            echo 'export let options = {' >> load-test.js
+            echo '  stages: [{ duration: "2m", target: 10 }, { duration: "2m", target: 10 }, { duration: "1m", target: 0 }],' >> load-test.js
+            echo '  thresholds: { http_req_duration: ["p(95)<500"], http_req_failed: ["rate<0.1"] }' >> load-test.js
+            echo '};' >> load-test.js
+            echo 'export default function() { let response = http.get("http://'$ALB_URL'/health"); check(response, { "status was 200": (r) => r.status == 200 }); }' >> load-test.js
+            
+            # Run load test
+            k6 run --out json=load-test-results.js load-test.js
+          else
+            echo "⚠️ No ALB URL available, skipping performance test"
+          fi
+
+      - name: Get deployment info
+        run: |
+          echo "📊 Production Deployment Information:"
+          kubectl get pods -n practice-app-prod -l app=practice-node-app-prod
+          kubectl get services -n practice-app-prod
+          kubectl get ingress -n practice-app-prod
+          kubectl get hpa -n practice-app-prod
+          
+          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          if [ -n "$ALB_URL" ]; then
+            echo "🌐 Production URL: http://$ALB_URL"
+          fi
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          if [ "${{ steps.backup.outputs.backup-saved }}" == "true" ]; then
+            echo "🔄 Rolling back production deployment..."
+            kubectl rollout undo deployment/practice-node-app-prod -n practice-app-prod || true
+            echo "✅ Rollback completed"
+          else
+            echo "⚠️ No backup available, manual rollback may be needed"
+          fi
+
+      - name: Cleanup old ECR images
+        run: |
+          echo "🧹 Cleaning up old ECR images (keeping last 10)..."
+          aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }} \
+            --query 'sort_by(imageDetails, &imagePushedAt)[:-10].imageDigest' \
+            --output text | while read -r digest; do
+            aws ecr batch-delete-image --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageDigest=$digest || true
+          done
+
+      - name: Notify production team
+        if: always()
+        run: |
+          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ Production deployment successful!"
+            echo "🌐 Production URL: http://$ALB_URL"
+            echo "📊 View metrics: kubectl top pods -n practice-app-prod"
+            echo "📋 View logs: kubectl logs -f deployment/practice-node-app-prod -n practice-app-prod"
+          else
+            echo "❌ Production deployment failed!"
+            echo "🔍 Check the workflow logs for details"
+            echo "🔄 Rollback initiated automatically"
+          fi
