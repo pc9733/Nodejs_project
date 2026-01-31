@@ -257,8 +257,8 @@ jobs:
             # Install k6
             sudo apt-get update && sudo apt-get install -y k6
             
-            # Run load test
-            k6 run --out json=load-test-results.js - <<EOF
+            # Create k6 script with actual ALB URL
+            cat > load-test.js << EOF
             import http from 'k6/http';
             import { check } from 'k6';
             
@@ -282,6 +282,9 @@ jobs:
               });
             }
             EOF
+            
+            # Run load test
+            k6 run --out json=load-test-results.js load-test.js
           else
             echo "⚠️ No ALB URL available, skipping performance test"
           fi
