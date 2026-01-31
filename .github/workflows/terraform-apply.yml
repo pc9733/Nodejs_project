@@ -14,7 +14,7 @@ on:
       auto_approve:
         description: "Auto-approve Terraform apply"
         required: false
-        default: "false"
+        default: false
         type: boolean
 
 env:
@@ -27,12 +27,8 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      cluster_name:
-        description: "EKS cluster name"
-        value: ${{ steps.apply.outputs.cluster_name }}
-      ecr_repository:
-        description: "ECR repository URL"
-        value: ${{ steps.apply.outputs.ecr_repository }}
+      cluster_name: ${{ steps.apply.outputs.cluster_name }}
+      ecr_repository: ${{ steps.apply.outputs.ecr_repository }}
 
     steps:
       - name: Checkout repository
