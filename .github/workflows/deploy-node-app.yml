@@ -6,10 +6,6 @@ on:
       image_tag:
         description: 'Image tag to deploy (leave empty for latest)'
         required: false
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 env:
   AWS_REGION: us-east-1
