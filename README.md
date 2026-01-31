@@ -108,12 +108,35 @@ Verify ALB provisioning with `kubectl get ingress practice-node-app -n practice-
 - ✅ Automated cleanup in correct dependency order
 - ✅ Consistent behavior between local and CI/CD environments
 
+## Application Deployment Prerequisites
+⚠️ **Important**: Before deploying the application, ensure:
+- ECR repository exists (created by Terraform)
+- EKS cluster is running and kubectl is configured
+- AWS Load Balancer Controller is installed
+
+**Common Issues:**
+- `ImagePullBackOff`: ECR repository is empty - run GitHub Actions workflow or build/push manually
+- `Pending` ALB: Check AWS Load Balancer Controller logs in `kube-system` namespace
+- Pod failures: Use `kubectl describe pod <pod-name> -n practice-app` for debugging
+
 ## End-to-End Flow
 1. Commit application or infra changes.
 2. Terraform plan/apply workflows provision/modify the AWS stack.
-3. The deploy workflow builds the container, pushes to ECR, and updates the Kubernetes deployment inside EKS.
-4. The AWS Load Balancer Controller detects the ingress and creates an ALB that fronts the service.
-5. Access the app through the ALB DNS name or via Route 53 if you attach a custom domain.
+3. **Deploy Application**: Use GitHub Actions or manual build/push:
+   ```bash
+   # Option A: GitHub Actions (Recommended)
+   # Trigger deploy-node-app.yml workflow
+   
+   # Option B: Manual deployment
+   cd node-app
+   docker build -t practice-node-app:latest .
+   aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 852994641319.dkr.ecr.us-east-1.amazonaws.com
+   docker tag practice-node-app:latest 852994641319.dkr.ecr.us-east-1.amazonaws.com/practice-node-app:latest
+   docker push 852994641319.dkr.ecr.us-east-1.amazonaws.com/practice-node-app:latest
+   kubectl apply -f k8s/
+   ```
+4. The AWS Load Balancer Controller creates an ALB.
+5. Access the app via the ALB DNS name.
 
 ## Troubleshooting Tips
 - If Terraform complains about lock-file mismatches, rerun `terraform init -upgrade`.
