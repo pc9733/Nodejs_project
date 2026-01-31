@@ -9,8 +9,8 @@ on:
         default: 'dev'
         type: choice
         options:
-        - dev
-        - prod
+          - dev
+          - prod
       auto_approve:
         description: "Auto-approve Terraform apply"
         required: false
