@@ -35,8 +35,10 @@ terraform apply -auto-approve
 echo "📊 Infrastructure Outputs:"
 terraform output
 
+echo "🔐 Configuring kubectl for the dev cluster..."
+aws eks update-kubeconfig --name practice-node-app-dev --region us-east-1
+
 echo "✅ Development environment created successfully!"
 echo ""
 echo "🔧 Next steps:"
-echo "1. Configure kubectl: aws eks update-kubeconfig --name practice-node-app-dev --region us-east-1"
-echo "2. Deploy application: ./deploy-dev.yml workflow"
+echo "1. Deploy application: ./deploy-dev.yml workflow"
