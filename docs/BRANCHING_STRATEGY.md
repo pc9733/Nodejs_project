@@ -20,14 +20,12 @@ main                    # Production-ready code
 ### **Development Environment (`deploy-dev.yml`)**
 
 **Triggers:**
-- ✅ **Auto**: Push to `develop`, `feature/*`, `hotfix/*`
-- ✅ **Auto**: Pull requests to `develop`
-- ✅ **Manual**: Workflow dispatch
+- ✅ **Manual ONLY**: Workflow dispatch (select image tag or use latest)
 
 **Purpose:**
-- Fast iteration and testing
-- Feature branch validation
-- Hotfix verification
+- Update the dev EKS cluster only when a build is ready
+- Keep the environment stable while feature work lands
+- Provide an intentional gate between CI and shared testing space
 
 **Environment:**
 - **Cluster**: `practice-node-app-dev`
@@ -64,6 +62,17 @@ main                    # Production-ready code
 - **Repository**: `practice-node-app-prod`
 - **Namespace**: `practice-app-prod`
 
+### **Continuous Integration (`node-ci.yml`)**
+
+**Triggers:**
+- ✅ **Auto**: Pushes to `develop`, `feature/*`, `hotfix/*`
+- ✅ **Auto**: Pull requests targeting `develop`
+
+**Purpose:**
+- Run `npm ci`, unit tests, and a smoke boot on every change
+- Provide fast feedback without touching AWS infrastructure
+- Gate merges before manual deployments are triggered
+
 ## 🛡️ Safety Controls
 
 ### **Production Safety**
@@ -82,8 +91,8 @@ approve_promotion:
 
 ### **Infrastructure Changes**
 ```yaml
-# Auto-plan on PR, manual apply
-terraform-plan.yml:  # Auto on PR to develop
+# Auto-plan on PR (infra changes only), manual apply
+terraform-plan.yml:  # Auto on PRs targeting develop/main when infra files change
 terraform-apply.yml: # Manual with environment selection
 ```
 
@@ -98,20 +107,23 @@ terraform-apply.yml: # Manual with environment selection
 
 ### **`develop` Branch**
 - **Purpose**: Integration and staging
-- **Auto-deployment**: ✅ Development environment
+- **Deployment Trigger**: Manual via `deploy-dev.yml` (run when ready)
+- **CI Coverage**: Node CI on every push/PR
 - **Source**: For production promotion
 - **Protection**: Pull requests required
 - **Target**: For main branch merges
 
 ### **`feature/*` Branches**
 - **Purpose**: Feature development
-- **Auto-deployment**: ✅ Development environment
+- **Deployment Trigger**: None (CI only). Use `deploy-dev.yml` after merge to update the cluster.
+- **CI Coverage**: Node CI on every push/PR
 - **Lifecycle**: Delete after merge
 - **Naming**: `feature/feature-name`
 
 ### **`hotfix/*` Branches**
 - **Purpose**: Emergency production fixes
-- **Auto-deployment**: ✅ Development environment
+- **Deployment Trigger**: Manual via `deploy-dev.yml` for validation
+- **CI Coverage**: Node CI on every push/PR
 - **Target**: Merge to both `develop` and `main`
 - **Priority**: Immediate attention required
 - **Production**: Manual deployment after testing
@@ -129,9 +141,10 @@ terraform-apply.yml: # Manual with environment selection
 ```bash
 1. Create feature branch: git checkout -b feature/new-feature develop
 2. Develop and test locally
-3. Push to feature/* → Auto-deploy to dev
-4. Create PR to develop → Auto-deploy to dev
-5. Merge to develop → Auto-deploy to dev
+3. Push to feature/* → Node CI runs (tests + smoke, no deploy)
+4. Create PR to develop → Node CI reruns + Terraform Plan if infra files changed
+5. Merge to develop → Nothing deploys automatically
+6. Run `deploy-dev.yml` manually to refresh the dev cluster when you’re ready for shared validation
 ```
 
 ### **Production Release**
@@ -152,52 +165,53 @@ terraform-apply.yml: # Manual with environment selection
 ```bash
 1. Create hotfix from main: git checkout -b hotfix/critical-fix main
 2. Fix issue and test locally
-3. Push to hotfix/* → Auto-deploy to dev
-4. Create PR to main and develop
-5. Merge to both → Manual production deployment
+3. Push to hotfix/* → Node CI runs (tests + smoke, no deploy)
+4. Optionally run `deploy-dev.yml` to validate in dev
+5. Create PR to main and develop
+6. Merge to both → Manual production deployment
 ```
 
 ## 🔍 Automation Matrix
 
 | Branch | Infra Plan | Infra Apply | Dev Deploy | Prod Deploy | Promotion |
 |--------|------------|-------------|------------|------------|----------|
-| `main` | ❌ Manual | ❌ Manual | ❌ No | ✅ Manual | ❌ No |
-| `develop` | ✅ Auto | ❌ Manual | ✅ Auto | ❌ No | ✅ Manual |
-| `feature/*` | ✅ Auto | ❌ Manual | ✅ Auto | ❌ No | ❌ No |
-| `hotfix/*` | ✅ Auto | ❌ Manual | ✅ Auto | ✅ Manual | ✅ Manual |
+| `main` | ✅ Auto on PRs touching `infra/**` | ❌ Manual (`terraform-apply.yml`) | ❌ N/A | ✅ Manual (`deploy-prod.yml`) | ✅ Manual (`promote-to-prod.yml`) |
+| `develop` | ✅ Auto on PRs targeting `develop` (infra-only) | ❌ Manual (`terraform-apply.yml`) | ⚙️ Manual (`deploy-dev.yml` when ready) | ❌ N/A | ✅ Manual (source for promotion) |
+| `feature/*` | ✅ Auto on PRs into `develop` (infra-only) | ❌ Manual | ⚙️ Manual (optional `deploy-dev.yml`) | ❌ N/A | ❌ N/A |
+| `hotfix/*` | ✅ Auto on PRs into `develop`/`main` (infra-only) | ❌ Manual | ⚙️ Manual (`deploy-dev.yml` to validate) | ✅ Manual (`deploy-prod.yml`) | ✅ Manual (`promote-to-prod.yml`) |
 | `release/*` | ❌ Deprecated | ❌ Deprecated | ❌ Deprecated | ❌ Deprecated | ❌ Deprecated |
 
 ## 📊 Environment Comparison
 
 | Feature | Development | Production |
 |---------|-------------|-------------|
-| **Branch** | `develop`, `feature/*` | `main` ONLY |
-| **Deployment** | Automatic | Manual ONLY |
+| **Branch** | `develop`, `feature/*`, `hotfix/*` | `main` ONLY |
+| **Deployment Trigger** | Manual via `deploy-dev.yml` | Manual via `deploy-prod.yml` or `promote-to-prod.yml` |
+| **CI Coverage** | Node CI on every push/PR | Node CI via PRs + manual gates |
 | **Replicas** | 1 | 3 |
 | **Resources** | Minimal | High |
 | **Monitoring** | Basic | Advanced |
 | **Security** | Basic | Enhanced |
 | **Testing** | Unit/Smoke | Full + Performance |
-| **Approval** | None | Manual Confirmation |
+| **Approval** | Workflow dispatch owner | Manual confirmation strings |
 
 ## 🔄 CI/CD Pipeline Flow
 
 ```mermaid
 graph TD
-    A[Feature Branch] --> B[Dev Deploy]
+    A[Feature Branch Push] --> B[Node CI]
     B --> C[PR to develop]
-    C --> D[Dev Deploy]
+    C --> D[Node CI + Terraform Plan (if infra)]
     D --> E[Merge to develop]
-    E --> F[Promote to Prod]
-    F --> G[Prod Deploy]
+    E --> F[Manual Deploy to Dev (deploy-dev.yml)]
+    F --> G[QA / Validation]
+    G --> H[Manual Promotion]
+    H --> I[Prod Deploy (deploy-prod.yml)]
     
-    H[Hotfix Branch] --> I[Dev Deploy]
-    I --> J[PR to main]
-    J --> K[Manual Prod Deploy]
-    
-    L[Release Branch] --> M[Dev Deploy]
-    M --> N[Auto Promote]
-    N --> O[Prod Deploy]
+    J[Hotfix Branch Push] --> K[Node CI]
+    K --> L[Optional Deploy to Dev]
+    L --> M[PR to main + develop]
+    M --> N[Manual Prod Deploy]
 ```
 
 ## 🛠️ Best Practices
