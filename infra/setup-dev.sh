@@ -16,19 +16,32 @@ fi
 
 # Create S3 bucket for Terraform state
 echo "📦 Creating S3 bucket for Terraform state..."
-aws s3api create-bucket \
-    --bucket practice-node-app-terraform-state-dev \
-    --region us-east-1 \
-    --create-bucket-configuration LocationConstraint=us-east-1 || echo "Bucket already exists"
+BUCKET_NAME="practice-node-app-terraform-state-dev"
+AWS_REGION="us-east-1"
+
+if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+    echo "Bucket already exists"
+else
+    if [ "$AWS_REGION" = "us-east-1" ]; then
+        aws s3api create-bucket \
+            --bucket "$BUCKET_NAME" \
+            --region "$AWS_REGION"
+    else
+        aws s3api create-bucket \
+            --bucket "$BUCKET_NAME" \
+            --region "$AWS_REGION" \
+            --create-bucket-configuration LocationConstraint="$AWS_REGION"
+    fi
+fi
 
 # Enable versioning
 aws s3api put-bucket-versioning \
-    --bucket practice-node-app-terraform-state-dev \
+    --bucket "$BUCKET_NAME" \
     --versioning-configuration Status=Enabled
 
 # Enable encryption
 aws s3api put-bucket-encryption \
-    --bucket practice-node-app-terraform-state-dev \
+    --bucket "$BUCKET_NAME" \
     --server-side-encryption-configuration '{
         "Rules": [
             {
