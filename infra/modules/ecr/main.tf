@@ -57,10 +57,12 @@ resource "aws_ecr_registry_scanning_configuration" "this" {
 
   scan_type = var.registry_scan_type
 
-  rules {
+  rule {
     scan_frequency = var.scan_frequency
-    filter {
-      tag_status = var.tag_status
+
+    repository_filter {
+      filter      = var.registry_filter
+      filter_type = var.registry_filter_type
     }
   }
 }
