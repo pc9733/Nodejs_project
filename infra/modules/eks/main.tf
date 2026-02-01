@@ -174,7 +174,7 @@ resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
   role       = aws_iam_role.eks_node_group.name
 }
 
-resource "aws_iam_role_policy_attachment"eks_container_registry_policy" {
+resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
   role       = aws_iam_role.eks_node_group.name
 }
@@ -229,9 +229,9 @@ resource "aws_eks_node_group" "this" {
 }
 
 # OIDC Provider for EKS
-resource "aws_iam_oidc_provider" "eks" {
+resource "aws_iam_openid_connect_provider" "eks" {
   client_id_list  = ["sts.amazonaws.com"]
-  provider_url   = aws_eks_cluster.this.identity[0].oidc[0].issuer
+  url             = aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
 
 # Kubernetes Provider Configuration
@@ -298,11 +298,11 @@ resource "aws_iam_role" "alb_controller" {
         Action = "sts:AssumeRoleWithWebIdentity"
         Effect = "Allow"
         Principal = {
-          Federated = aws_iam_oidc_provider.eks.arn
+          Federated = aws_iam_openid_connect_provider.eks.arn
         }
         Condition = {
           StringEquals = {
-            "${replace(aws_iam_oidc_provider.eks.url, "https://", ""):sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
+            "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
           }
         }
       }

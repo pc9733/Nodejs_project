@@ -56,36 +56,38 @@ variable "enable_lifecycle_policy" {
 variable "lifecycle_policy" {
   description = "Lifecycle policy document"
   type        = string
-  default = jsonencode({
-    rules = [
-      {
-        rulePriority = 1
-        description  = "Keep last 10 images"
-        selection = {
-          tagStatus     = "tagged"
-          tagPrefixList = ["v"]
-          countType     = "imageCountMoreThan"
-          countNumber   = 10
-        }
-        action = {
-          type = "expire"
-        }
+  default     = <<POLICY
+{
+  "rules": [
+    {
+      "rulePriority": 1,
+      "description": "Keep last 10 images",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["v"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 10
       },
-      {
-        rulePriority = 2
-        description  = "Keep untagged images for 7 days"
-        selection = {
-          tagStatus = "untagged"
-          countType = "sinceImagePushed"
-          countUnit = "days"
-          countNumber = 7
-        }
-        action = {
-          type = "expire"
-        }
+      "action": {
+        "type": "expire"
       }
-    ]
-  })
+    },
+    {
+      "rulePriority": 2,
+      "description": "Keep untagged images for 7 days",
+      "selection": {
+        "tagStatus": "untagged",
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 7
+      },
+      "action": {
+        "type": "expire"
+      }
+    }
+  ]
+}
+POLICY
 }
 
 variable "enable_registry_scanning" {
@@ -116,19 +118,24 @@ variable "scan_frequency" {
   }
 }
 
-variable "tag_status" {
-  description = "Tag status for registry scanning"
-  type        = string
-  default     = "ANY"
-  
-  validation {
-    condition     = contains(["TAGGED", "UNTAGGED", "ANY"], var.tag_status)
-    error_message = "Tag status must be one of TAGGED, UNTAGGED, or ANY."
-  }
-}
-
 variable "tags" {
   description = "Common tags for all resources"
   type        = map(string)
   default     = {}
+}
+
+variable "registry_filter" {
+  description = "Repository filter pattern for registry scanning (e.g., '*', 'prod-*')"
+  type        = string
+  default     = "*"
+}
+
+variable "registry_filter_type" {
+  description = "Filter type for registry scanning"
+  type        = string
+  default     = "WILDCARD"
+  validation {
+    condition     = contains(["WILDCARD", "PREFIX_MATCH"], var.registry_filter_type)
+    error_message = "Registry filter type must be WILDCARD or PREFIX_MATCH."
+  }
 }
