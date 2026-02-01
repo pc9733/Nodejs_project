@@ -72,6 +72,16 @@ jobs:
             type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.image_tag }},enable=${{ github.event.inputs.image_tag != '' }}
+
+      - name: Determine image tag
+        id: image_tag
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF_NAME##*/}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build and push image
         uses: docker/build-push-action@v5
@@ -106,7 +116,7 @@ jobs:
 
       - name: Verify image in ECR
         run: |
-          IMAGE_TAG="latest"
+          IMAGE_TAG="${{ steps.image_tag.outputs.tag }}"
           FULL_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
           
           if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
@@ -126,7 +136,7 @@ jobs:
           kubectl apply -f k8s/environments/dev/all-in-one.yaml
           
           # Update deployment with latest image
-          kubectl set image deployment/practice-node-app-dev node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app-dev
+          kubectl set image deployment/practice-node-app-dev node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image_tag.outputs.tag }} -n practice-app-dev
           
           echo "✅ Development deployment completed!"
 
