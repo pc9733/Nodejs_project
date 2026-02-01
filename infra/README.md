@@ -1,245 +1,246 @@
 # Infrastructure Management
 
-This directory contains Terraform configurations for managing AWS infrastructure using a modular, environment-separated approach.
+Simplified infrastructure management for AWS EKS, VPC, and ECR using Terraform with environment separation.
 
-## 🏗️ Architecture
+## 🎯 Quick Start
+
+### **Create Environments:**
+```bash
+cd infra
+
+# Development (no confirmation needed)
+./create-dev.sh
+
+# Production (requires safety confirmation)
+./create-prod.sh
+# Type: create-production
+```
+
+### **Destroy Environments:**
+```bash
+cd infra
+
+# Development (no confirmation needed)
+./destroy-dev-simple.sh
+
+# Production (requires safety confirmation)
+./destroy-prod-simple.sh
+# Type: destroy-production
+```
+
+## 📁 File Structure
 
 ```
 infra/
-├── modules/                    # Reusable Terraform modules
+├── environments/              # Environment-specific configs
+│   ├── dev/                   # Development environment
+│   └── prod/                  # Production environment
+├── modules/                   # Reusable Terraform modules
 │   ├── vpc/                   # VPC, subnets, networking
 │   ├── eks/                   # EKS cluster, node groups
 │   ├── ecr/                   # ECR repositories
 │   └── security/              # Security configurations
-├── environments/              # Environment-specific configs
-│   ├── dev/                   # Development environment
-│   └── prod/                  # Production environment
-├── setup-dev.sh              # Setup development environment
-├── setup-prod.sh             # Setup production environment
-├── apply-dev.sh              # Apply development changes
-├── apply-prod.sh             # Apply production changes
-├── destroy-dev.sh            # Destroy development environment
-├── destroy-prod.sh           # Destroy production environment
-├── apply-all.sh              # Apply all environments
-├── destroy-all.sh            # Destroy all environments
-└── auto-destroy.sh           # Legacy single-environment destroy
+├── create-dev.sh             # Create development environment
+├── create-prod.sh            # Create production environment
+├── destroy-dev-simple.sh     # Destroy development environment
+├── destroy-prod-simple.sh    # Destroy production environment
+├── setup-dev.sh              # Setup development state backend
+├── setup-prod.sh             # Setup production state backend
+├── main.tf                   # Main Terraform configuration
+├── variables.tf              # Terraform variables
+├── outputs.tf                # Terraform outputs
+└── backend.tf                # Terraform backend configuration
 ```
 
-## 🚀 Quick Start
+## 🚀 Environment Details
 
-### Development Environment
+### **Development Environment:**
+- **Cluster Name:** `practice-node-app-dev`
+- **ECR Repository:** `practice-node-app-dev`
+- **Namespace:** `practice-app-dev`
+- **Node Size:** `t3.small`
+- **Node Count:** 1-2 nodes
 
+### **Production Environment:**
+- **Cluster Name:** `practice-node-app-prod`
+- **ECR Repository:** `practice-node-app-prod`
+- **Namespace:** `practice-app-prod`
+- **Node Size:** `t3.medium`
+- **Node Count:** 2-4 nodes
+
+## 🛡️ Safety Features
+
+### **Production Protection:**
+- ✅ **Typed confirmation required** for create/destroy operations
+- ✅ **Clear warnings** before destructive actions
+- ✅ **State management cleanup** to prevent orphaned resources
+
+### **Error Handling:**
+- ✅ **Scripts stop on errors** with `set -e`
+- ✅ **Directory validation** ensures running from correct location
+- ✅ **State backend setup** before operations
+
+## 📋 Script Functions
+
+### **create-dev.sh**
+1. Validates directory structure
+2. Sets up development state backend (S3 + DynamoDB)
+3. Initializes Terraform
+4. Plans infrastructure changes
+5. Applies infrastructure automatically
+6. Displays Terraform outputs
+
+### **create-prod.sh**
+1. Safety confirmation (type: `create-production`)
+2. Validates directory structure
+3. Sets up production state backend (S3 + DynamoDB)
+4. Initializes Terraform
+5. Plans infrastructure changes
+6. Applies infrastructure automatically
+7. Displays Terraform outputs
+
+### **destroy-dev-simple.sh**
+1. Validates directory structure
+2. Sets up development state backend
+3. Initializes Terraform
+4. Destroys all infrastructure
+5. Cleans up state management (S3 bucket + DynamoDB table)
+
+### **destroy-prod-simple.sh**
+1. Safety confirmation (type: `destroy-production`)
+2. Validates directory structure
+3. Sets up production state backend
+4. Initializes Terraform
+5. Destroys all infrastructure
+6. Cleans up state management (S3 bucket + DynamoDB table)
+
+## 🔧 State Management
+
+### **Development:**
+- **S3 Bucket:** `practice-node-app-terraform-state-dev`
+- **DynamoDB Table:** `practice-node-app-terraform-locks-dev`
+- **State Key:** `dev/terraform.tfstate`
+
+### **Production:**
+- **S3 Bucket:** `practice-node-app-terraform-state-prod`
+- **DynamoDB Table:** `practice-node-app-terraform-locks-prod`
+- **State Key:** `prod/terraform.tfstate`
+
+## 🚀 GitHub Actions Integration
+
+Use GitHub Actions workflows for CI/CD:
+
+### **Infrastructure:**
+- **`terraform-apply.yml`** - Manual infrastructure creation
+- **`terraform-destroy.yml`** - Manual infrastructure destruction
+- **`terraform-plan.yml`** - Infrastructure planning and PR comments
+
+### **Deployments:**
+- **`deploy-dev.yml`** - Automatic development deployments
+- **`deploy-prod.yml`** - Manual production deployments
+- **`promote-to-prod.yml`** - Production promotion workflow
+
+## 📊 Infrastructure Components
+
+### **VPC Module:**
+- Public and private subnets
+- Internet gateway and NAT gateways
+- Route tables and associations
+- Security groups
+
+### **EKS Module:**
+- EKS cluster with control plane
+- Managed node groups
+- IAM roles and policies
+- AWS Load Balancer Controller
+- Kubernetes cluster access
+
+### **ECR Module:**
+- Private container registry
+- Image scanning on push
+- Lifecycle policies
+- Encryption at rest
+
+## 🔧 Prerequisites
+
+### **AWS CLI:**
 ```bash
-# Setup (one-time)
-./setup-dev.sh
-
-# Apply infrastructure
-./apply-dev.sh
-
-# Deploy application
-# Trigger deploy-dev.yml GitHub Actions workflow
+aws configure
+# Enter AWS Access Key ID, Secret Access Key, Region (us-east-1)
 ```
 
-### Production Environment
-
+### **Terraform:**
 ```bash
-# Setup (one-time)
-./setup-prod.sh
-
-# Apply infrastructure
-./apply-prod.sh
-
-# Deploy application
-# Trigger deploy-prod.yml GitHub Actions workflow with approval
+# Install Terraform >= 1.0
+# Follow: https://learn.hashicorp.com/tutorials/terraform/install-cli
 ```
 
-## 📋 Environment Comparison
-
-| Feature | Development | Production |
-|---------|-------------|-------------|
-| **VPC CIDR** | 10.1.0.0/16 | 10.2.0.0/16 |
-| **EKS Nodes** | 1 (t3.small) | 3 (t3.medium/large) |
-| **ECR** | Mutable tags | Immutable tags |
-| **Encryption** | AES256 | KMS |
-| **NAT Gateway** | Disabled | Enabled |
-| **ALB Access** | Internal | Internet-facing |
-| **Logging** | Basic | Enhanced |
-| **Security** | Basic | Advanced |
-
-## 🔧 Script Usage
-
-### Setup Scripts
-
+### **kubectl:**
 ```bash
-./setup-dev.sh    # Creates S3 bucket, DynamoDB table, initializes Terraform
-./setup-prod.sh   # Creates production resources with enhanced security
+# Install kubectl
+# Follow: https://kubernetes.io/docs/tasks/tools/
 ```
 
-### Apply Scripts
+## 📝 Usage Examples
 
+### **Create Development Environment:**
 ```bash
-./apply-dev.sh    # Applies development infrastructure
-./apply-prod.sh   # Applies production infrastructure (requires confirmation)
-./apply-all.sh    # Applies both environments (requires confirmation)
+cd infra
+./create-dev.sh
+# Output: EKS cluster endpoint, ECR repository URL, etc.
 ```
 
-### Destroy Scripts
-
+### **Configure kubectl:**
 ```bash
-./destroy-dev.sh    # Destroys development environment
-./destroy-prod.sh   # Destroys production environment (requires confirmation)
-./destroy-all.sh    # Destroys both environments (requires confirmation)
-./auto-destroy.sh   # Legacy single-environment destroy (deprecated)
-```
-
-## 🔒 Safety Features
-
-### Production Protection
-- **Manual Confirmation**: Production operations require typed confirmation
-- **Enhanced Security**: KMS encryption, private endpoints, network policies
-- **Resource Limits**: Quotas and PDBs to prevent resource exhaustion
-
-### State Management
-- **Separate Backends**: Dev and prod use different S3 buckets
-- **State Locking**: DynamoDB tables prevent concurrent modifications
-- **Encryption**: All state files are encrypted at rest
-
-## 📊 Cost Management
-
-### Development Environment
-- **Minimal Resources**: Single t3.small node
-- **No NAT Gateway**: Saves costs on private subnet access
-- **Basic Logging**: Reduced CloudWatch costs
-
-### Production Environment
-- **High Availability**: Multiple nodes across AZs
-- **Enhanced Monitoring**: Comprehensive logging and metrics
-- **Security Features**: Advanced security controls
-
-## 🔄 Workflow Integration
-
-### Development Pipeline
-- **Triggers**: `develop`, `feature/*`, `hotfix/*` branches
-- **Repository**: `practice-node-app-dev`
-- **Namespace**: `practice-app-dev`
-- **Deployment**: Fast, basic testing
-
-### Production Pipeline
-- **Triggers**: `main` branch, releases, manual approval
-- **Repository**: `practice-node-app-prod`
-- **Namespace**: `practice-app-prod`
-- **Deployment**: Security scanning, performance testing, rollback
-
-## 🛠️ Manual Operations
-
-### Terraform Commands
-
-```bash
-# Development
-cd environments/dev
-terraform plan    # Preview changes
-terraform apply   # Apply changes
-terraform destroy # Destroy environment
-
-# Production
-cd environments/prod
-terraform plan    # Preview changes
-terraform apply   # Apply changes
-terraform destroy # Destroy environment
-```
-
-### Kubernetes Commands
-
-```bash
-# Development
-aws eks update-kubeconfig --name practice-node-app-dev
-kubectl get pods -n practice-app-dev
-
-# Production
-aws eks update-kubeconfig --name practice-node-app-prod
-kubectl get pods -n practice-app-prod
-```
-
-## 🚨 Emergency Procedures
-
-### Complete Cleanup
-```bash
-# Destroy everything
-./destroy-all.sh
-
-# Clean up any remaining resources
-aws cloudformation delete-stack --stack-name practice-node-app-dev || true
-aws cloudformation delete-stack --stack-name practice-node-app-prod || true
-```
-
-### Recovery
-```bash
-# Recreate from scratch
-./setup-dev.sh && ./apply-dev.sh
-./setup-prod.sh && ./apply-prod.sh
-```
-
-## 📈 Monitoring
-
-### AWS Resources
-- **CloudWatch**: EKS metrics, logs, alarms
-- **Cost Explorer**: Track spending by environment
-- **CloudTrail**: Audit all API calls
-
-### Kubernetes Resources
-- **kubectl**: Pod status, events, logs
-- **Prometheus**: Metrics collection (if configured)
-- **Grafana**: Visualization (if configured)
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-**Terraform State Lock**
-```bash
-# Force unlock (use with caution)
-terraform force-unlock LOCK_ID
-```
-
-**EKS Cluster Not Ready**
-```bash
-# Check cluster status
-aws eks describe-cluster --name practice-node-app-dev
-
-# Check node group status
-aws eks describe-nodegroup --cluster-name practice-node-app-dev --nodegroup-name practice-node-app-dev-node-group
-```
-
-**kubectl Connection Issues**
-```bash
-# Update kubeconfig
 aws eks update-kubeconfig --name practice-node-app-dev --region us-east-1
-
-# Test connection
 kubectl get nodes
 ```
 
-## 📚 Documentation
+### **Destroy Development Environment:**
+```bash
+cd infra
+./destroy-dev-simple.sh
+# All infrastructure removed
+```
 
-- **[Main README](../README.md)** - Project overview
-- **[Infrastructure Guide](../docs/INFRASTRUCTURE.md)** - Detailed infrastructure documentation
-- **[Kubernetes Guide](../docs/KUBERNETES.md)** - Kubernetes manifests and usage
-- **[CI/CD Documentation](../docs/CICD.md)** - Pipeline configuration
+## 🚨 Important Notes
 
-## 🤝 Contributing
+### **Production Safety:**
+- Always confirm production actions by typing the required phrase
+- Double-check environment before running destructive commands
+- Use GitHub Actions for production deployments when possible
 
-When making changes to infrastructure:
+### **State Management:**
+- Never manually delete S3 state buckets or DynamoDB tables
+- Always use the provided scripts for cleanup
+- State files are encrypted and versioned
 
-1. **Test in Development First**: Always test changes in dev environment
-2. **Use Terraform Format**: `terraform fmt` before committing
-3. **Document Changes**: Update relevant documentation
-4. **Review Plans**: Always review `terraform plan` output
-5. **Tag Resources**: Use consistent tagging across environments
+### **Cost Management:**
+- Development environment uses smaller instances for cost efficiency
+- Remember to destroy environments when not in use
+- Monitor AWS costs in the console
 
-## 📞 Support
+## 🔍 Troubleshooting
 
-For infrastructure issues:
-1. Check the troubleshooting section
-2. Review AWS CloudWatch logs
-3. Examine Terraform state and outputs
-4. Check GitHub Actions workflow logs
+### **Common Issues:**
+1. **"State bucket not found"** - Run setup script first
+2. **"Permission denied"** - Check AWS credentials
+3. **"Terraform init failed"** - Verify backend configuration
+4. **"Cluster already exists"** - Destroy existing environment first
+
+### **Get Help:**
+```bash
+# Check Terraform state
+cd environments/dev && terraform state list
+
+# Check AWS resources
+aws eks list-clusters --region us-east-1
+aws ecr describe-repositories --region us-east-1
+```
+
+## 📚 Additional Resources
+
+- [Terraform Documentation](https://www.terraform.io/docs)
+- [AWS EKS Documentation](https://docs.aws.amazon.com/eks/)
+- [Kubernetes Documentation](https://kubernetes.io/docs/)
+- [GitHub Actions Documentation](https://docs.github.com/en/actions)

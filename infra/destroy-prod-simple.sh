@@ -1,20 +1,13 @@
 #!/bin/bash
 # =================================================================
 # DESTROY PRODUCTION ENVIRONMENT
-# Safely destroys production infrastructure
 # =================================================================
 
 set -e
 
-echo "🔥 Destroying Production Environment..."
+echo "🔥 Destroying PRODUCTION Environment..."
 
-# Check if we're in the right directory
-if [ ! -d "environments/prod" ]; then
-    echo "❌ Error: Please run this script from the infra/ directory"
-    exit 1
-fi
-
-# Safety check for production
+# Safety check
 echo "⚠️  WARNING: This will destroy the PRODUCTION environment!"
 echo "🔒 Type 'destroy-production' to confirm:"
 read -r confirmation
@@ -23,22 +16,28 @@ if [ "$confirmation" != "destroy-production" ]; then
     exit 1
 fi
 
-# Setup state backend first
-echo "� Setting up state backend..."
+# Check if we're in the right directory
+if [ ! -d "environments/prod" ]; then
+    echo "❌ Error: Please run this script from the infra/ directory"
+    exit 1
+fi
+
+# Setup state backend
+echo "🔧 Setting up state backend..."
 ./setup-prod.sh
 
 # Go to prod environment directory
 cd environments/prod
 
 # Initialize Terraform
-echo "� Initializing Terraform..."
+echo "🔧 Initializing Terraform..."
 terraform init
 
 # Destroy infrastructure
 echo "🗑️  Destroying infrastructure..."
 terraform destroy -auto-approve
 
-# Clean up S3 bucket and DynamoDB table
+# Clean up state management
 echo "🗑️  Cleaning up state management..."
 cd ..
 aws s3 rb "s3://practice-node-app-terraform-state-prod" --force || true
