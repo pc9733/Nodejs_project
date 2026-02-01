@@ -28,15 +28,15 @@ Protection Rules:
 #### **Required Status Checks:**
 ```yaml
 Required Status Checks:
-✅ CI/CD Pipeline
-  - build-and-deploy (dev workflow)
-  - terraform-plan (if infra changes)
-✅ Code Quality
-  - tests (if configured)
+✅ Node CI
+  - node-ci / test (runs on every push/PR)
+✅ Terraform Plan (if infra changes)
+  - terraform-plan / plan (runs only when infra files change in the PR)
+✅ Optional Extras
   - lint (if configured)
-✅ Security
-  - trivy-scan (vulnerability scanning)
+  - security scans (e.g., trivy)
 ```
+> 💡 When configuring branch protection, enable “Require status checks to pass that are found in the last week” so GitHub enforces `terraform-plan` only on PRs where it actually runs.
 
 ### **Branch Access Control:**
 
@@ -66,25 +66,27 @@ Allowed merge methods:
 
 1. Create feature branch from develop
 2. Develop and test
-3. Push to feature/* → Auto-dev-deploy
-4. Create PR to develop → Auto-dev-deploy
-5. Merge to develop → Auto-dev-deploy
-6. Create PR from develop to main
-7. PR review and approval required
-8. Status checks must pass
-9. Merge to main → NO auto-deploy
-10. Manual production deploy via deploy-prod.yml workflow
+3. Push to feature/* → Node CI runs (tests + smoke only)
+4. Create PR to develop → Node CI + Terraform Plan (if infra changes)
+5. Merge to develop → Nothing deploys automatically
+6. Manually run `deploy-dev.yml` when you want the dev cluster updated
+7. Create PR from develop to main
+8. PR review and approval required
+9. Status checks must pass
+10. Merge to main → NO auto-deploy
+11. Manual production deploy via `deploy-prod.yml` workflow
 ```
 
 ### **Emergency Hotfix Flow:**
 ```bash
 1. Create hotfix branch from main
 2. Fix and test locally
-3. Push to hotfix/* → Auto-dev-deploy
-4. Create PR to main (emergency bypass possible)
-5. Admin approval for emergency merge
-6. Merge to main → NO auto-deploy
-7. Manual production deploy
+3. Push to hotfix/* → Node CI runs (tests + smoke only)
+4. Manually run `deploy-dev.yml` (optional) to validate the fix in dev
+5. Create PR to main (emergency bypass possible)
+6. Admin approval for emergency merge
+7. Merge to main → NO auto-deploy
+8. Manual production deploy (`deploy-prod.yml` or `promote-to-prod.yml`)
 ```
 
 ## 🔒 Security Benefits

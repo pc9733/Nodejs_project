@@ -14,11 +14,6 @@ on:
   pull_request:
     paths:
       - 'infra/**'
-  push:
-    branches:
-      - develop
-    paths:
-      - 'infra/**'
 
 env:
   AWS_REGION: us-east-1

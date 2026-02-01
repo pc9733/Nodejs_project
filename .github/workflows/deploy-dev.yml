@@ -6,11 +6,6 @@ on:
       image_tag:
         description: 'Image tag to deploy (leave empty for latest)'
         required: false
-  push:
-    branches: [ develop, feature/*, hotfix/* ]
-  pull_request:
-    branches: [ develop ]
-    types: [ opened, synchronize, reopened ]
 
 env:
   AWS_REGION: us-east-1
