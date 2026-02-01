@@ -1,409 +1,75 @@
 # CI/CD Pipeline Documentation
 
-## GitHub Actions Workflows (`.github/workflows/`)
+## Workflow Catalog
 
-### Main Deployment Pipeline (`deploy-node-app.yml`)
+| Workflow | File | Trigger(s) | Purpose |
+|----------|------|------------|---------|
+| Node CI | `.github/workflows/node-ci.yml` | Pushes to `develop`, `feature/*`, `hotfix/*` (docs ignored) and PRs to `develop` | Run Node.js install, unit tests, and a smoke test without touching infrastructure.
+| Deploy to Development | `.github/workflows/deploy-dev.yml` | Manual `workflow_dispatch` | Builds an image and deploys the latest tag into the dev namespace/cluster.
+| Deploy to Production | `.github/workflows/deploy-prod.yml` | Manual `workflow_dispatch` + approval text | Builds image, deploys manifests to prod, runs health/perf gates.
+| Canary Deployment | `.github/workflows/canary-deploy.yml` | Manual `workflow_dispatch` | Spin up a canary deployment and split traffic via ingress weights.
+| Promote to Production | `.github/workflows/promote-to-prod.yml` | Manual `workflow_dispatch` + approval text | Promote a specific commit from `develop` to prod after validation.
+| Terraform Plan | `.github/workflows/terraform-plan.yml` | Manual `workflow_dispatch` or PRs touching `infra/**` | Generate a Terraform plan per environment and publish the artifact/PR comment.
+| Terraform Apply | `.github/workflows/terraform-apply.yml` | Manual `workflow_dispatch` only | Run Terraform plan+apply for dev/prod when `auto_approve=true`.
+| Terraform Destroy | `.github/workflows/terraform-destroy.yml` | Manual `workflow_dispatch` only | Tear down an environment after explicit confirmation phrases.
+| Legacy Deploy | `.github/workflows/deploy-node-app.yml` | Manual `workflow_dispatch` | Old one-shot workflow for the monolithic namespace; kept for reference only.
 
-#### Triggers
-- **Manual**: `workflow_dispatch`
-- **Automatic**: Push to `main` branch
-- **Pull Requests**: PRs to `main` branch
+> **Key change:** Pushes to `develop` no longer deploy or run Terraform. They only run the `Node CI` workflow. Deployments and Terraform applies must now be triggered intentionally.
 
-#### Pipeline Stages
+## Workflow Details
 
-##### 1. Code Quality & Testing
-```yaml
-- name: Set up Node.js
-  uses: actions/setup-node@v4
-  with:
-    node-version: 18
-    cache: npm
-    cache-dependency-path: node-app/package-lock.json
+### Node CI (`node-ci.yml`)
+- **Why**: Ensures every push/PR still runs Node.js tests without automatically touching AWS or Kubernetes.
+- **Steps**: Checkout → `setup-node@v4` → `npm ci` (full dev install) → `npm test` (non-blocking if no tests) → smoke test by requiring `server.js`.
+- **Notes**: `paths-ignore` skips docs-only pushes, keeping the pipeline fast.
 
-- name: Install dependencies
-  working-directory: node-app
-  run: npm ci --omit=dev
+### Deploy to Development (`deploy-dev.yml`)
+- **Trigger**: Manual input for `image_tag` (defaults to `latest`).
+- **Steps**: Similar to CI but includes `npm ci --omit=dev`, Docker build/push, Trivy scan, kubeconfig update, manifest apply for `k8s/environments/dev/all-in-one.yaml`, rollout wait, health checks, and cleanup.
+- **Result**: Only runs when requested, so merges to `develop` are safe until you hit “Run workflow.”
 
-- name: Run tests
-  working-directory: node-app
-  run: npm test || echo "No tests configured, skipping..."
+### Deploy to Production (`deploy-prod.yml`)
+- **Trigger**: Manual with `approve_deployment` set to `deploy-production`.
+- **Steps**: Build/push prod image, security scan, explicit approval gate, kubeconfig update, manifest apply for prod namespace, rollout+health/perf checks, optional k6 load test, and ECR cleanup.
+- **Use**: Run only after dev validation and a Terraform plan/apply (if infra changed).
 
-- name: Run smoke test
-  working-directory: node-app
-  run: node -e "require('./server'); console.log('Server module loads successfully')"
-```
+### Canary Deployment (`canary-deploy.yml`)
+- **Trigger**: Manual, specify traffic % (1–50) and optional `image_tag`.
+- **Flow**: Clone the main deployment into `practice-node-app-canary`, update to selected image, wait for rollout, patch ingress rules to split traffic, and emit cleanup instructions.
+- **Follow-up**: Use `promote-to-prod.yml` or `deploy-prod.yml` once confidence is built.
 
-##### 2. Build & Security
-```yaml
-- name: Build and push image
-  uses: docker/build-push-action@v5
-  with:
-    context: ./node-app
-    file: ./node-app/Dockerfile
-    push: true
-    tags: ${{ steps.meta.outputs.tags }}
-    labels: ${{ steps.meta.outputs.labels }}
-    cache-from: type=gha
-    cache-to: type=gha,mode=max
+### Promote to Production (`promote-to-prod.yml`)
+- **Trigger**: Manual with `approve_promotion` set to `promote-production`; optional `commit_sha` targeting a specific `develop` commit.
+- **Flow**: Checkout full history, resolve commit SHA, rerun Node.js install/tests, authenticate to AWS/ECR, update prod manifests to that artifact, and run the same health checks as a standard prod deploy.
 
-- name: Run Trivy vulnerability scanner
-  uses: aquasecurity/trivy-action@0.16.1
-  continue-on-error: true
-  with:
-    image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-    format: 'sarif'
-    output: 'trivy-results.sarif'
-    severity: 'CRITICAL,HIGH'
-    skip-dirs: '/tmp,/var'
+### Terraform Plan (`terraform-plan.yml`)
+- **Triggers**: Manual dispatch (choose `dev` or `prod`) *or* automatically on PRs that touch `infra/**`.
+- **Flow**: Determine environment, run remote-state bootstrap script, `terraform init/validate/plan`, upload `tfplan` artifact, render `plan.json`, and comment on PRs.
+- **Change from old setup**: Pushes to `develop` no longer invoke this workflow; you get plans only where they’re reviewed.
 
-- name: Upload Trivy scan results
-  uses: github/codeql-action/upload-sarif@v4
-  if: always() && hashFiles('trivy-results.sarif') != ''
-  continue-on-error: true
-  with:
-    sarif_file: 'trivy-results.sarif'
-```
+### Terraform Apply (`terraform-apply.yml`)
+- **Trigger**: Manual dispatch. You **must** set `auto_approve=true`; otherwise the workflow halts intentionally after printing instructions.
+- **Flow**: Same bootstrap/init/validate/plan sequence as the plan workflow, followed by `terraform apply -auto-approve tfplan`, outputs (`cluster_name`, `ecr_repository_url`), kubeconfig update, optional cluster verification, and a summary block detailing next steps (e.g., run `deploy-dev` or `deploy-prod`).
 
-##### 3. Deployment
-```yaml
-- name: Verify image in ECR
-  run: |
-    IMAGE_TAG="latest"
-    if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG; then
-      echo "✅ Image found in ECR"
-    else
-      echo "❌ Image not found"
-      exit 1
-    fi
+### Terraform Destroy (`terraform-destroy.yml`)
+- **Trigger**: Manual dispatch only, with confirmation strings (`destroy` and `destroy-production`).
+- **Flow**: Remote-state bootstrap, `terraform destroy -auto-approve`, optional cleanup of S3/DynamoDB state stores, and a summary of removed resources.
 
-- name: Deploy manifests
-  run: |
-    kubectl apply -f k8s/namespace.yaml
-    kubectl apply -f k8s/service.yaml
-    kubectl apply -f k8s/ingress.yaml
-    
-    # Environment-specific configs
-    if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-      kubectl apply -f k8s/configmaps.yml
-      kubectl apply -f k8s/service-discovery.yml
-    fi
-    
-    # Update deployment image
-    kubectl set image deployment/practice-node-app node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app
-```
+### Legacy Deploy (`deploy-node-app.yml`)
+- **Status**: Kept for historical reference; still available via manual dispatch but not recommended for multi-env setups.
+- **Behavior**: Applies everything under `k8s/` to the shared namespace and updates the single deployment image.
 
-##### 4. Verification & Monitoring
-```yaml
-- name: Wait for rollout
-  run: |
-    kubectl rollout status deployment/practice-node-app -n practice-app --timeout=600s || {
-      echo "Rollout failed, checking status..."
-      kubectl get pods -n practice-app -l app=practice-node-app
-      exit 1
-    }
+## Recommended Release Flow
 
-- name: Health check
-  run: |
-    kubectl wait --for=condition=ready pod -l app=practice-node-app -n practice-app --timeout=300s
-    
-    # Test ALB endpoint
-    ALB_URL="${{ steps.deploy.outputs.alb-url }}"
-    if [ -n "$ALB_URL" ]; then
-      for i in {1..10}; do
-        if curl -f -s http://$ALB_URL/health > /dev/null; then
-          echo "✅ ALB health check passed"
-          break
-        fi
-        sleep 30
-      done
-    fi
+1. **Developers push code** → `Node CI` runs automatically (tests + smoke). Fix failures before opening PRs.
+2. **Infra changes?** → Open a PR; `Terraform Plan` posts the plan automatically for review. Iterate until approved.
+3. **Merge to `develop`** → Nothing deploys automatically. When ready, manually:
+   1. Run `deploy-dev.yml` (select image tag if you need an older artifact).
+   2. Smoke-test the app / run any QA checks in dev.
+   3. If Terraform changes are needed, trigger `terraform-apply.yml` for the relevant environment with `auto_approve=true`.
+4. **Preparing prod**:
+   - Option A: Run a canary via `canary-deploy.yml`, monitor, then `promote-to-prod.yml`.
+   - Option B: Run `deploy-prod.yml` directly with the approval passphrase.
+5. **Cleanup**: When an environment must be torn down, run `terraform-destroy.yml` with the required confirmations.
 
-- name: Performance test
-  if: github.ref == 'refs/heads/main'
-  run: |
-    # Install k6 and run load test
-    K6_VERSION="v0.55.0"
-    curl -L -o k6.tar.gz "https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-amd64.tar.gz"
-    tar -xzf k6.tar.gz
-    sudo mv k6-${K6_VERSION}-linux-amd64/k6 /usr/local/bin/
-    
-    # Run 3-minute load test
-    k6 run --out json=load-test-results.js load-test.js
-```
-
-##### 5. Cleanup & Notification
-```yaml
-- name: Cleanup old ECR images
-  if: github.ref == 'refs/heads/main'
-  run: |
-    aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} \
-      --query 'sort_by(imageDetails, &imagePushedAt)[:-5].imageDigest' \
-      --output text | while read -r digest; do
-      aws ecr batch-delete-image --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageDigest=$digest || true
-    done
-```
-
-### Canary Deployment Pipeline (`canary-deploy.yml`)
-
-#### Features
-- **Traffic Splitting**: Configurable percentage (1-50%)
-- **Canary Monitoring**: Health verification and metrics
-- **Promote/Rollback**: Manual decision workflows
-- **Zero-Downtime**: Smooth traffic transitions
-
-#### Usage
-```bash
-# Trigger canary with 10% traffic
-# Use GitHub Actions UI with inputs:
-# - traffic_percentage: 10
-# - image_tag: latest (optional)
-```
-
-#### Canary Deployment Process
-```yaml
-- name: Create canary deployment
-  run: |
-    # Clone main deployment as canary
-    kubectl get deployment practice-node-app -n practice-app -o yaml | \
-      sed 's/practice-node-app/practice-node-app-canary/g' | \
-      kubectl apply -f -
-    
-    # Update canary with new image
-    kubectl set image deployment/practice-node-app-canary node-app=${IMAGE} -n practice-app
-
-- name: Update ingress for traffic splitting
-  run: |
-    # Patch ingress to split traffic
-    kubectl patch ingress practice-node-app -n practice-app --type='json' -p='[{
-      "op": "replace",
-      "path": "/spec/rules/0/http/paths",
-      "value": [
-        {
-          "path": "/",
-          "backend": {"service": {"name": "practice-node-app-canary", "port": {"number": 80}}},
-          "weight": '$TRAFFIC_PERCENTAGE'
-        },
-        {
-          "path": "/",
-          "backend": {"service": {"name": "practice-node-app", "port": {"number": 80}}},
-          "weight": '$MAIN_TRAFFIC'
-        }
-      ]
-    }]'
-```
-
-### Environment-Specific Deployments
-
-#### Staging Environment
-```yaml
-# Triggered on PRs and feature branches
-- Namespace: practice-app-staging
-- Replicas: 1
-- Resources: Minimal
-- Ingress: Internal only
-- Tests: Full validation
-```
-
-#### Production Environment
-```yaml
-# Triggered on main branch merge
-- Namespace: practice-app-prod
-- Replicas: 3
-- Resources: High allocation
-- Ingress: Full ALB access
-- Tests: Full validation + performance testing
-```
-
-## Workflow Permissions
-
-### Required Permissions
-```yaml
-permissions:
-  contents: read
-  packages: write
-  actions: read
-  security-events: write    # For SARIF upload
-  pull-requests: write     # For PR comments
-```
-
-### AWS Credentials
-```yaml
-- name: Configure AWS credentials
-  uses: aws-actions/configure-aws-credentials@v4
-  with:
-    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    aws-region: ${{ env.AWS_REGION }}
-```
-
-## Environment Variables
-
-### Global Environment
-```yaml
-env:
-  AWS_REGION: us-east-1
-  ECR_REPOSITORY: practice-node-app
-  EKS_CLUSTER_NAME: practice-node-app
-```
-
-### Required GitHub Secrets
-- `AWS_ACCESS_KEY_ID`: AWS access key
-- `AWS_SECRET_ACCESS_KEY`: AWS secret key
-
-## Image Tagging Strategy
-
-### Docker Metadata Action
-```yaml
-- name: Extract metadata
-  id: meta
-  uses: docker/metadata-action@v5
-  with:
-    images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-    tags: |
-      type=ref,event=branch
-      type=ref,event=pr
-      type=sha,prefix={{branch}}-
-      type=raw,value=latest,enable={{is_default_branch}}
-```
-
-### Generated Tags
-- **Main Branch**: `main`, `latest`, `main-{commit-sha}`
-- **Pull Requests**: `pr-{number}`, `pr-{number}-{commit-sha}`
-- **Feature Branches**: `{branch}`, `{branch}-{commit-sha}`
-
-## Security Features
-
-### Vulnerability Scanning
-```yaml
-- name: Run Trivy vulnerability scanner
-  uses: aquasecurity/trivy-action@0.16.1
-  with:
-    image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-    format: 'sarif'
-    severity: 'CRITICAL,HIGH'
-```
-
-### SARIF Upload
-```yaml
-- name: Upload Trivy scan results
-  uses: github/codeql-action/upload-sarif@v4
-  with:
-    sarif_file: 'trivy-results.sarif'
-```
-
-### Image Security
-- **Base Image Scanning**: Trivy scans base layers
-- **Application Scanning**: Scans final image
-- **Dependency Scanning**: npm audit during build
-- **Secret Scanning**: Trivy secret detection
-
-## Performance Testing
-
-### k6 Load Test Configuration
-```javascript
-export let options = {
-  stages: [
-    { duration: '1m', target: 5 },    // Ramp up to 5 users
-    { duration: '1m', target: 5 },    // Hold at 5 users
-    { duration: '1m', target: 0 },    // Ramp down
-  ],
-  thresholds: {
-    http_req_duration: ['p(95)<500'],    // 95th percentile < 500ms
-    http_req_failed: ['rate<0.1'],       // < 10% failure rate
-  },
-};
-```
-
-### Performance Metrics
-- **Response Time**: 95th percentile < 500ms
-- **Success Rate**: > 90%
-- **Throughput**: Requests per second
-- **Error Rate**: < 10%
-
-## Rollback and Recovery
-
-### Automatic Rollback
-```yaml
-- name: Rollback on failure
-  if: failure()
-  run: |
-    if kubectl rollout undo deployment/practice-node-app -n practice-app; then
-      echo "✅ Rollback completed"
-    else
-      echo "⚠️ Rollback failed, manual intervention required"
-    fi
-```
-
-### Manual Rollback Commands
-```bash
-# Rollback to previous revision
-kubectl rollout undo deployment/practice-node-app -n practice-app
-
-# Check rollback status
-kubectl rollout status deployment/practice-node-app -n practice-app
-
-# View rollout history
-kubectl rollout history deployment/practice-node-app -n practice-app
-```
-
-## Monitoring and Observability
-
-### Deployment Monitoring
-```yaml
-- name: Debug deployment issues
-  if: failure()
-  run: |
-    kubectl get pods -n practice-app -l app=practice-node-app -o wide
-    kubectl get events -n practice-app --sort-by='.lastTimestamp' | tail -10
-    kubectl describe deployment practice-node-app -n practice-app
-```
-
-### Health Check Endpoints
-- **Application**: `/health` endpoint
-- **Kubernetes**: Pod readiness and liveness probes
-- **ALB**: HTTP health checks
-- **Performance**: k6 load test results
-
-## Notification and Alerting
-
-### Success Notifications
-```yaml
-- name: Notify deployment success
-  if: success()
-  run: |
-    echo "✅ Deployment successful!"
-    echo "📊 Image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
-    echo "🌐 ALB: ${{ steps.deploy.outputs.alb-url }}"
-```
-
-### Failure Alerts
-```yaml
-- name: Notify failure
-  if: failure()
-  run: |
-    echo "❌ Deployment failed for ${{ github.sha }}"
-    echo "🔍 Check workflow logs for details"
-```
-
-## Best Practices
-
-### Workflow Design
-- **Idempotent**: Safe to re-run
-- **Atomic**: All or nothing deployment
-- **Observable**: Comprehensive logging and monitoring
-- **Secure**: Minimal permissions and secret handling
-- **Efficient**: Caching and parallel execution
-
-### Security Considerations
-- **Least Privilege**: Minimal required permissions
-- **Secret Management**: GitHub secrets for credentials
-- **Image Scanning**: Automated vulnerability detection
-- **Network Security**: VPC and security group configuration
-
-### Performance Optimization
-- **Docker Caching**: GitHub Actions cache for layers
-- **Parallel Execution**: Independent steps run in parallel
-- **Resource Limits**: Appropriate runner specifications
-- **Artifact Management**: Efficient artifact handling
-
-This CI/CD pipeline provides enterprise-grade automation with proper security, monitoring, and reliability features for deploying containerized applications to Kubernetes.
+This separation keeps CI fast, makes deployments intentional, and prevents Terraform from running on every push while still documenting a clear path from commit → dev → prod.
