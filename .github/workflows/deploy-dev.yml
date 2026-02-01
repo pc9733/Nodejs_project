@@ -79,8 +79,11 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "IMAGE_TAG=${{ github.event.inputs.image_tag }}" >> $GITHUB_ENV
           else
-            echo "tag=${GITHUB_REF_NAME##*/}" >> $GITHUB_OUTPUT
+            TAG="${GITHUB_REF_NAME##*/}"
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
           fi
 
       - name: Build and push image
@@ -98,7 +101,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.16.1
         continue-on-error: true
         with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image_tag.outputs.tag }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
@@ -116,7 +119,7 @@ jobs:
 
       - name: Verify image in ECR
         run: |
-          IMAGE_TAG="${{ steps.image_tag.outputs.tag }}"
+          IMAGE_TAG="${IMAGE_TAG}"
           FULL_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
           
           if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
@@ -136,7 +139,7 @@ jobs:
           kubectl apply -f k8s/environments/dev/all-in-one.yaml
           
           # Update deployment with latest image
-          kubectl set image deployment/practice-node-app-dev node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image_tag.outputs.tag }} -n practice-app-dev
+          kubectl set image deployment/practice-node-app-dev node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG} -n practice-app-dev
           
           echo "✅ Development deployment completed!"
 
