@@ -15,6 +15,12 @@ on:
         description: 'Type "destroy" to confirm destruction'
         required: true
         default: 'cancel'
+        type: string
+      prod_confirm:
+        description: 'Type "destroy-production" to confirm production destruction'
+        required: false
+        default: 'cancel'
+        type: string
 
 env:
   AWS_REGION: us-east-1
@@ -43,19 +49,25 @@ jobs:
       - name: Confirm destruction
         run: |
           if [ "${{ github.event.inputs.confirm_destroy }}" != "destroy" ]; then
-            echo " Destruction not confirmed. Type 'destroy' to confirm."
+            echo "❌ Destruction not confirmed. Type 'destroy' to confirm."
             exit 1
           fi
           
           if [ "${{ github.event.inputs.environment }}" = "prod" ]; then
-            echo " WARNING: You are about to destroy the PRODUCTION environment!"
-            echo "This action cannot be undone."
-            echo "Type 'destroy-production' to confirm:"
-            read -r prod_confirmation
-            if [ "$prod_confirmation" != "destroy-production" ]; then
-              echo " Production destruction cancelled."
+            if [ "${{ github.event.inputs.prod_confirm }}" != "destroy-production" ]; then
+              echo "❌ Production destruction not confirmed. Type 'destroy-production' to confirm."
               exit 1
             fi
+            echo "⚠️ WARNING: Destroying PRODUCTION environment!"
+          fi
+
+      - name: Setup state backend for ${{ github.event.inputs.environment }}
+        run: |
+          cd infra
+          if [ "${{ github.event.inputs.environment }}" = "dev" ]; then
+            ./setup-dev.sh
+          elif [ "${{ github.event.inputs.environment }}" = "prod" ]; then
+            ./setup-prod.sh
           fi
 
       - name: Terraform init
