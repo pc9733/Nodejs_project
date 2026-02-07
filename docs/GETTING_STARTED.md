@@ -58,7 +58,7 @@ These credentials must allow ECR, EKS, and ECR image lifecycle operations.
 ```bash
 cd node-app
 npm ci
-npm test || echo "No tests configured"
+npm test
 node server.js               # Hit http://localhost:3000/health in another terminal
 ```
 
