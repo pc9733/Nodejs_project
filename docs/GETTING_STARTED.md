@@ -14,20 +14,30 @@ git clone <repo-url>
 cd Nodejs_project
 ```
 
-## 3. Bootstrap Terraform Remote State (one-time)
+## 3. Bootstrap Terraform Remote State (one-time per environment)
 ```bash
 cd infra
-./setup-remote-state.sh      # Creates S3 bucket + DynamoDB table referenced by backend
-terraform init               # Uses the remote backend
+# Development
+./setup-dev.sh
+
+# Production
+./setup-prod.sh
 ```
+Each script creates the S3 bucket/DynamoDB lock table, enables versioning/encryption, and runs `terraform init`+`plan` inside `infra/environments/<env>`.
 
 ## 4. Provision the Environment
+Run the helper scripts to apply infrastructure (they re-run `setup-*.sh` for safety):
 ```bash
-terraform plan -out=tfplan   # Review changes
-terraform apply tfplan       # Create VPC, EKS, ECR, IAM, ALB controller, etc.
-terraform output             # Capture cluster_name and ecr_repository_url
+cd infra
+
+# Development
+./create-dev.sh
+
+# Production (requires confirmation)
+./create-prod.sh
+# When prompted, type: create-production
 ```
-*See `docs/INFRASTRUCTURE.md` for component details.*
+The scripts perform init → plan → `terraform apply -auto-approve`, print outputs, and run `aws eks update-kubeconfig` for you. *See `docs/INFRASTRUCTURE.md` for component details.*
 
 ## 5. Configure kubectl Access
 ```bash

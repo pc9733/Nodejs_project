@@ -44,9 +44,14 @@
 #### Initial Setup
 ```bash
 cd infra
-./setup-remote-state.sh    # One-time S3 + DynamoDB setup
-terraform init             # Initialize with remote backend
+
+# Development backend + init
+./setup-dev.sh
+
+# Production backend + init
+./setup-prod.sh
 ```
+Each script provisions the S3 bucket + DynamoDB lock table for its environment, enables encryption/versioning, and runs `terraform init` (and an initial `plan`) within `infra/environments/<env>`.
 
 #### Daily Operations
 ```bash

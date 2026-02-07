@@ -7,10 +7,14 @@ Complete infrastructure-as-code solution for deploying a Node.js application on 
 ### 1. Infrastructure Setup
 ```bash
 cd infra
-./setup-remote-state.sh    # One-time setup
-terraform init
-terraform apply            # Create AWS resources
+
+# Development
+./create-dev.sh
+
+# Production (requires confirmation prompt)
+./create-prod.sh
 ```
+These helper scripts handle backend bootstrapping (S3 bucket + DynamoDB table), run `terraform init/plan`, and apply the environment automatically.
 
 ### 2. Deploy Application
 ```bash
