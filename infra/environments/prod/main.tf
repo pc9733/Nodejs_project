@@ -138,7 +138,7 @@ module "eks" {
   max_unavailable_percentage = 33
   
   enable_alb_controller       = true
-  alb_controller_version      = "1.7.2"
+  alb_controller_version      = "3.0.0"
 
   tags = merge(
     {

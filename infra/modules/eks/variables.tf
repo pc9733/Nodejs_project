@@ -123,7 +123,13 @@ variable "enable_alb_controller" {
 variable "alb_controller_version" {
   description = "Version of AWS Load Balancer Controller Helm chart"
   type        = string
-  default     = "1.7.2"
+  default     = "3.0.0"
+}
+
+variable "alb_controller_policy_json" {
+  description = "Policy JSON used for the AWS Load Balancer Controller IAM role"
+  type        = string
+  default     = null
 }
 
 variable "tags" {

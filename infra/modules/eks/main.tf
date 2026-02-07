@@ -204,9 +204,12 @@ resource "aws_eks_node_group" "this" {
 
   disk_size = var.disk_size
 
-  remote_access {
-    ec2_ssh_key = var.ssh_key_name
-    source_security_group_ids = var.node_security_group_ids
+  dynamic "remote_access" {
+    for_each = var.ssh_key_name != null || length(var.node_security_group_ids) > 0 ? [1] : []
+    content {
+      ec2_ssh_key               = var.ssh_key_name
+      source_security_group_ids = var.node_security_group_ids
+    }
   }
 
   update_config {
@@ -259,6 +262,9 @@ resource "helm_release" "aws_load_balancer_controller" {
   chart      = "aws-load-balancer-controller"
   namespace  = "kube-system"
   version    = var.alb_controller_version
+  timeout    = 600
+  cleanup_on_fail = true
+  max_history     = 5
 
   set {
     name  = "clusterName"
@@ -277,12 +283,21 @@ resource "helm_release" "aws_load_balancer_controller" {
 
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = aws_iam_role.alb_controller.arn
+    value = aws_iam_role.alb_controller[count.index].arn
   }
 
   depends_on = [
     aws_iam_role_policy_attachment.alb_controller_policy
   ]
+}
+
+# ALB Controller IAM Policy
+resource "aws_iam_policy" "alb_controller" {
+  count = var.enable_alb_controller ? 1 : 0
+
+  name        = "${var.cluster_name}-alb-controller-policy"
+  description = "IAM policy for AWS Load Balancer Controller"
+  policy      = coalesce(var.alb_controller_policy_json, file("${path.module}/../../iam-policy-alb.json"))
 }
 
 # ALB Controller IAM Role
@@ -321,8 +336,8 @@ resource "aws_iam_role" "alb_controller" {
 resource "aws_iam_role_policy_attachment" "alb_controller_policy" {
   count = var.enable_alb_controller ? 1 : 0
 
-  policy_arn = "arn:aws:iam::aws:policy/AWSLoadBalancerControllerIAMPolicy"
-  role       = aws_iam_role.alb_controller[0].name
+  policy_arn = aws_iam_policy.alb_controller[count.index].arn
+  role       = aws_iam_role.alb_controller[count.index].name
 }
 
 # Data sources for authentication
