@@ -423,10 +423,10 @@ cd infra && ./auto-destroy.sh
 # 2. Remove state files (if needed)
 rm -rf .terraform .terraform.lock.hcl terraform.tfstate*
 
-# 3. Re-initialize
-./setup-remote-state.sh
-terraform init
-terraform apply
+# 3. Re-initialize backend + recreate environment
+# (choose the script for your environment)
+./setup-dev.sh        # or ./setup-prod.sh
+./create-dev.sh       # or ./create-prod.sh
 ```
 
 ### Application Recovery
