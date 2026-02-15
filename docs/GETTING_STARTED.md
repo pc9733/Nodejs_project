@@ -54,19 +54,20 @@ Follow these steps once per cluster so Datadog metrics and logs flow during dev 
    helm upgrade --install datadog-operator datadog/datadog-operator \
      --namespace datadog --create-namespace
    ```
-2. Create the credentials secret referenced by `k8s/environments/dev/all-in-one.yaml`:
+2. Create the credentials secret referenced by `k8s/environments/dev/all-in-one.yaml` (values are stored only in the cluster):
    ```bash
    kubectl create secret generic datadog-secret -n datadog \
      --from-literal api-key=<DATADOG_API_KEY> \
      --from-literal app-key=<DATADOG_APP_KEY>
    ```
-   (If you prefer GitOps, update the placeholder `stringData` values in the manifest before committing.)
 3. Apply/refresh the dev manifests so the `DatadogAgent` CR is reconciled:
    ```bash
    kubectl apply -f k8s/environments/dev/all-in-one.yaml
    kubectl get pods -n datadog
    ```
    Wait for the daemonset pods to report `Running`, then confirm data in the Datadog UI.
+
+Need more help? See `docs/TROUBLESHOOTING.md` (Datadog section) for fixes covering missing CRDs, invalid API keys, pod scheduling limits, and dashboard visibility tips.
 
 ## 7. Configure GitHub Secrets (required for workflows)
 In the GitHub repo settings → *Secrets and variables → Actions*, add:

@@ -70,6 +70,62 @@ kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-cont
 
 ### Kubernetes Issues
 
+#### Datadog Observability Issues
+
+**Issue: `kubectl apply` fails because Datadog CRD missing**
+```
+error: the server doesn't have a resource type "datadogagent"
+```
+
+**Solution:**
+```bash
+helm repo add datadog https://helm.datadoghq.com
+helm upgrade --install datadog-operator datadog/datadog-operator \
+  --namespace datadog --create-namespace
+# Then re-apply
+kubectl apply -f k8s/environments/dev/all-in-one.yaml
+```
+
+**Issue: Datadog pods complain about missing namespace/secret**
+```
+Error from server (NotFound): namespaces "datadog" not found
+```
+or
+```
+Failed to find secret datadog-secret
+```
+
+**Solution:**
+```bash
+kubectl create namespace datadog
+kubectl create secret generic datadog-secret -n datadog \
+  --from-literal=api-key=<DATADOG_API_KEY> \
+  --from-literal=app-key=<DATADOG_APP_KEY> \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl rollout restart ds/datadog-agent -n datadog
+kubectl rollout restart deploy/datadog-cluster-agent -n datadog
+```
+Store the real keys only in the cluster; remove placeholder `stringData` blocks from source manifests so future applies don’t overwrite the secret.
+
+**Issue: Agent/cluster-agent logs show `API Key invalid (403)`**
+```
+kubectl logs datadog-agent-xxxxx -n datadog | grep -i "API Key invalid"
+```
+
+**Solution:** Recreate the `datadog-secret` via the dry-run/apply command above to ensure the latest keys are present, then restart the daemonset and cluster-agent deployment. Confirm new pods omit 403 errors in the logs and that `kubectl get datadogagent datadog -n datadog -o jsonpath='{.status}'` reports `Running (1/1/1)`.
+
+**Issue: Cluster Agent Pending / FailedScheduling (`Too many pods`)**
+```
+Warning  FailedScheduling  0/1 nodes are available: 1 Too many pods.
+```
+
+**Solution:** The worker node has exhausted ENI IPs. Reduce other workloads temporarily (`kubectl scale deployment practice-node-app-dev -n practice-app-dev --replicas=1`) or add another worker / larger instance type. Once a slot is available, restart the cluster-agent deployment so it schedules successfully.
+
+**Issue: “No data for the dev app in Datadog UI” even though agents run**
+
+- Datadog groups Kubernetes workloads by namespace/deployment. Filter the Infrastructure → Kubernetes view by `Cluster: practice-node-app-dev` and `Namespace: practice-app-dev` instead of `service:`.
+- To leverage Service Catalog filters, add Datadog tags on the workload, e.g. `DD_SERVICE=practice-node-app`, `DD_ENV=dev`, or `tags.datadoghq.com/service=practice-node-app` in the deployment manifest, then redeploy.
+
 #### Pod Problems
 
 **Issue: ImagePullBackOff**

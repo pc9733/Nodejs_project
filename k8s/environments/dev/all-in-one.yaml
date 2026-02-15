@@ -50,7 +50,7 @@ spec:
         resources:
           requests:
             memory: "128Mi"
-            cpu: "2000m"
+            cpu: "500m"
           limits:
             memory: "256Mi"
             cpu: "2000m"
@@ -162,22 +162,6 @@ metadata:
     environment: development
 
 ---
-# Datadog API/App key secret (update placeholders before applying)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: datadog-secret
-  namespace: datadog
-  labels:
-    app: datadog-agent
-    environment: development
-type: Opaque
-stringData:
-  api-key: "REPLACE_WITH_DATADOG_API_KEY"
-  app-key: "REPLACE_WITH_DATADOG_APP_KEY"
-
----
-
 apiVersion: datadoghq.com/v2alpha1
 kind: DatadogAgent
 metadata:
@@ -191,7 +175,7 @@ spec:
       apiSecret:
         secretName: datadog-secret
         keyName: api-key
-      appKeySecret:
+      appSecret:
         secretName: datadog-secret
         keyName: app-key
     tags:
