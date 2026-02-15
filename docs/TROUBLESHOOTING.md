@@ -196,6 +196,11 @@ curl http://practice-node-app.practice-app.svc.cluster.local
 # Check service configuration
 kubectl describe service practice-node-app -n practice-app
 ```
+Additional causes & fixes:
+- **Selector mismatch**: `kubectl describe service` shows `Endpoints: <none>` when `spec.selector` doesn’t match pod labels (e.g., `app=practice-node-app-devis`). Update the selector or pod labels, then reapply.
+- **Namespace mismatch**: Service lives in `practice-app-dev` but pods run in `default`; create the Service in the same namespace or use `ExternalName`.
+- **Pods not Ready**: endpoints controller only adds Ready pods; check `kubectl get pods -l app=practice-node-app -n practice-app` for pod readiness and events.
+- **Headless service / StatefulSets**: ensure the headless Service (`clusterIP: None`) matches StatefulSet ordinals; misnamed services yield no DNS entries.
 
 **Issue: Ingress Not Working**
 ```bash

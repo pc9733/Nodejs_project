@@ -46,7 +46,29 @@ kubectl get nodes
 ```
 Optional: apply the dev manifests manually with `kubectl apply -f k8s/environments/dev/all-in-one.yaml` if you need an immediate smoke test.
 
-## 6. Configure GitHub Secrets (required for workflows)
+## 6. Configure Datadog (optional but recommended)
+Follow these steps once per cluster so Datadog metrics and logs flow during dev deploys.
+1. Install the Datadog Operator and CRDs (creates/uses the `datadog` namespace):
+   ```bash
+   helm repo add datadog https://helm.datadoghq.com
+   helm upgrade --install datadog-operator datadog/datadog-operator \
+     --namespace datadog --create-namespace
+   ```
+2. Create the credentials secret referenced by `k8s/environments/dev/all-in-one.yaml`:
+   ```bash
+   kubectl create secret generic datadog-secret -n datadog \
+     --from-literal api-key=<DATADOG_API_KEY> \
+     --from-literal app-key=<DATADOG_APP_KEY>
+   ```
+   (If you prefer GitOps, update the placeholder `stringData` values in the manifest before committing.)
+3. Apply/refresh the dev manifests so the `DatadogAgent` CR is reconciled:
+   ```bash
+   kubectl apply -f k8s/environments/dev/all-in-one.yaml
+   kubectl get pods -n datadog
+   ```
+   Wait for the daemonset pods to report `Running`, then confirm data in the Datadog UI.
+
+## 7. Configure GitHub Secrets (required for workflows)
 In the GitHub repo settings → *Secrets and variables → Actions*, add:
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
@@ -54,7 +76,7 @@ In the GitHub repo settings → *Secrets and variables → Actions*, add:
 
 These credentials must allow ECR, EKS, and ECR image lifecycle operations.
 
-## 7. Validate the Application Locally
+## 8. Validate the Application Locally
 ```bash
 cd node-app
 npm ci
@@ -62,7 +84,7 @@ npm test
 node server.js               # Hit http://localhost:3000/health in another terminal
 ```
 
-## 8. Deploy to Development via GitHub Actions
+## 9. Deploy to Development via GitHub Actions
 1. Push changes to a branch; `Node CI` (`.github/workflows/node-ci.yml`) runs automatically.
 2. When ready, open the **Deploy to Development** workflow:
    - Choose `Run workflow` → select branch.
@@ -78,12 +100,12 @@ node server.js               # Hit http://localhost:3000/health in another termi
    ```
 *Reference: `docs/CICD.md` (Deploy to Development section).*
 
-## 9. Optional Canary + Promotion
+## 10. Optional Canary + Promotion
 1. Trigger **canary-deploy.yml** to split traffic (specify percentage and optional `image_tag`).
 2. Monitor metrics/logs.
 3. Promote using **promote-to-prod.yml** if the canary looks good.
 
-## 10. Deploy to Production
+## 11. Deploy to Production
 1. Ensure the prod Terraform stack is applied (same `infra/` code with prod vars if used).
 2. Run **deploy-prod.yml**:
    - Provide `image_tag` if deploying a specific artifact.
@@ -94,7 +116,7 @@ node server.js               # Hit http://localhost:3000/health in another termi
    kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
    ```
 
-## 11. Teardown / Maintenance
+## 12. Teardown / Maintenance
 - Use **terraform-destroy.yml** or run `terraform destroy` locally with the confirmation strings when you need to remove an environment.
 - ECR cleanup runs automatically in both deploy workflows, but you can also manage tags manually via the AWS console.
 
