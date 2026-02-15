@@ -50,10 +50,10 @@ spec:
         resources:
           requests:
             memory: "128Mi"
-            cpu: "100m"
+            cpu: "2000m"
           limits:
             memory: "256Mi"
-            cpu: "200m"
+            cpu: "2000m"
         livenessProbe:
           httpGet:
             path: /health
@@ -149,3 +149,63 @@ data:
   DB_PASSWORD: ZGV2LXBhc3N3b3JkMTIz  # base64: "dev-password123"
   API_KEY: ZGV2LWFwaS1rZXktc2VjcmV0  # base64: "dev-api-key-secret"
   JWT_SECRET: ZGV2LWp3dC1zZWNyZXQta2V5  # base64: "dev-jwt-secret-key"
+
+---
+
+# Datadog Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: datadog
+  labels:
+    app: datadog-agent
+    environment: development
+
+---
+# Datadog API/App key secret (update placeholders before applying)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: datadog-secret
+  namespace: datadog
+  labels:
+    app: datadog-agent
+    environment: development
+type: Opaque
+stringData:
+  api-key: "REPLACE_WITH_DATADOG_API_KEY"
+  app-key: "REPLACE_WITH_DATADOG_APP_KEY"
+
+---
+
+apiVersion: datadoghq.com/v2alpha1
+kind: DatadogAgent
+metadata:
+  name: datadog
+  namespace: datadog
+spec:
+  global:
+    clusterName: practice-node-app-dev
+    site: datadoghq.com
+    credentials:
+      apiSecret:
+        secretName: datadog-secret
+        keyName: api-key
+      appKeySecret:
+        secretName: datadog-secret
+        keyName: app-key
+    tags:
+      - env:dev
+      - service:practice-node-app
+  features:
+    clusterChecks:
+      enabled: true
+    orchestratorExplorer:
+      enabled: true
+    kubeStateMetricsCore:
+      enabled: true
+    logCollection:
+      enabled: true
+  
+
+---
