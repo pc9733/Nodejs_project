@@ -47,7 +47,7 @@ variable "enable_nat_gateway" {
 variable "kubernetes_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "1.29"
+  default     = "1.31"
 }
 
 variable "endpoint_public_access" {
