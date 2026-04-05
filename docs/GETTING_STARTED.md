@@ -69,7 +69,57 @@ Follow these steps once per cluster so Datadog metrics and logs flow during dev 
 
 Need more help? See `docs/TROUBLESHOOTING.md` (Datadog section) for fixes covering missing CRDs, invalid API keys, pod scheduling limits, and dashboard visibility tips.
 
-## 7. Configure GitHub Secrets (required for workflows)
+## 7. Enable Cluster Autoscaler (optional, recommended for bursty loads)
+1. **Create an IRSA role** that trusts the cluster’s OIDC provider and limits the subject to the autoscaler service account:
+   ```bash
+   cat > trust.json <<'EOF'
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Principal": {
+           "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/oidc.eks.<region>.amazonaws.com/id/<OIDC_ID>"
+         },
+         "Action": "sts:AssumeRoleWithWebIdentity",
+         "Condition": {
+           "StringEquals": {
+             "oidc.eks.<region>.amazonaws.com/id/<OIDC_ID>:aud": "sts.amazonaws.com",
+             "oidc.eks.<region>.amazonaws.com/id/<OIDC_ID>:sub": "system:serviceaccount:kube-system:cluster-autoscaler"
+           }
+         }
+       }
+     ]
+   }
+   EOF
+
+   aws iam update-assume-role-policy \
+     --role-name eks_policy \
+     --policy-document file://trust.json
+   ```
+   Attach the AWS-managed Cluster Autoscaler policy (or the JSON from `docs/INFRASTRUCTURE.md`) so the role can call `autoscaling:*` and read EC2 metadata.
+
+2. **Tag the node-group Auto Scaling group(s)** so auto-discovery works:
+   ```bash
+   aws autoscaling create-or-update-tags --tags \
+     ResourceId=<asg-name> ResourceType=auto-scaling-group \
+     Key=k8s.io/cluster-autoscaler/enabled,Value=true,PropagateAtLaunch=true \
+     ResourceId=<asg-name> ResourceType=auto-scaling-group \
+     Key=k8s.io/cluster-autoscaler/practice-node-app-dev,Value=owned,PropagateAtLaunch=true
+   ```
+
+3. **Apply the manifest** to install RBAC and the deployment:
+   ```bash
+   kubectl apply -f k8s/addons/cluster-autoscaler.yaml
+   kubectl -n kube-system rollout status deploy/cluster-autoscaler
+   ```
+   The file hard-codes the dev cluster name (`practice-node-app-dev`), AWS region (`us-east-1`), and expects the IRSA annotation to reference the `eks_policy` role ARN. Update those values before applying if your environment differs.
+
+4. **Verify behavior**:
+   - `kubectl -n kube-system logs deploy/cluster-autoscaler -f` should show successful ASG cache refreshes and scale decisions (no `AccessDenied`).
+   - Scale your dev deployment temporarily (`kubectl scale deployment practice-node-app-dev -n practice-app-dev --replicas=50`) and watch `kubectl get nodes` plus `aws autoscaling describe-auto-scaling-groups` to confirm nodes are added, then scale back down.
+
+## 8. Configure GitHub Secrets (required for workflows)
 In the GitHub repo settings → *Secrets and variables → Actions*, add:
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
@@ -77,7 +127,7 @@ In the GitHub repo settings → *Secrets and variables → Actions*, add:
 
 These credentials must allow ECR, EKS, and ECR image lifecycle operations.
 
-## 8. Validate the Application Locally
+## 9. Validate the Application Locally
 ```bash
 cd node-app
 npm ci
@@ -85,7 +135,7 @@ npm test
 node server.js               # Hit http://localhost:3000/health in another terminal
 ```
 
-## 9. Deploy to Development via GitHub Actions
+## 10. Deploy to Development via GitHub Actions
 1. Push changes to a branch; `Node CI` (`.github/workflows/node-ci.yml`) runs automatically.
 2. When ready, open the **Deploy to Development** workflow:
    - Choose `Run workflow` → select branch.
@@ -101,12 +151,12 @@ node server.js               # Hit http://localhost:3000/health in another termi
    ```
 *Reference: `docs/CICD.md` (Deploy to Development section).*
 
-## 10. Optional Canary + Promotion
+## 11. Optional Canary + Promotion
 1. Trigger **canary-deploy.yml** to split traffic (specify percentage and optional `image_tag`).
 2. Monitor metrics/logs.
 3. Promote using **promote-to-prod.yml** if the canary looks good.
 
-## 11. Deploy to Production
+## 12. Deploy to Production
 1. Ensure the prod Terraform stack is applied (same `infra/` code with prod vars if used).
 2. Run **deploy-prod.yml**:
    - Provide `image_tag` if deploying a specific artifact.
@@ -117,7 +167,7 @@ node server.js               # Hit http://localhost:3000/health in another termi
    kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
    ```
 
-## 12. Teardown / Maintenance
+## 13. Teardown / Maintenance
 - Use **terraform-destroy.yml** or run `terraform destroy` locally with the confirmation strings when you need to remove an environment.
 - ECR cleanup runs automatically in both deploy workflows, but you can also manage tags manually via the AWS console.
 
