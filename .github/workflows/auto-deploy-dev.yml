@@ -13,8 +13,10 @@ env:
 
 jobs:
   deploy:
-    # Only deploy if tests passed
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only deploy on push to develop (not on PRs), and only if tests passed
+    if: |
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -8,17 +8,27 @@ on:
         required: true
         default: '10'
       image_tag:
-        description: 'Image tag to deploy (leave empty for latest commit SHA)'
+        description: 'Image tag to deploy (leave empty to build from HEAD of main)'
         required: false
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - promote
+          - rollback
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: practice-node-app
-  EKS_CLUSTER_NAME: practice-node-app
+  ECR_REPOSITORY: practice-node-app-prod
+  EKS_CLUSTER_NAME: practice-node-app-prod
 
 jobs:
   canary-deploy:
     runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'deploy'
     permissions:
       contents: read
       packages: write
@@ -49,31 +59,29 @@ jobs:
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             IMAGE_TAG="${{ github.event.inputs.image_tag }}"
           else
-            IMAGE_TAG="${{ github.sha }}"
+            IMAGE_TAG="main-$(echo ${{ github.sha }} | cut -c1-7)"
           fi
           echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "Using image tag: $IMAGE_TAG"
 
       - name: Create canary deployment
         run: |
-          # Create canary deployment from main deployment
-          kubectl get deployment practice-node-app -n practice-app -o yaml | \
-            sed 's/practice-node-app/practice-node-app-canary/g' | \
+          kubectl get deployment practice-node-app-prod -n practice-app-prod -o yaml | \
+            sed 's/practice-node-app-prod/practice-node-app-prod-canary/g' | \
             kubectl apply -f -
-          
-          # Update canary with new image
-          kubectl set image deployment/practice-node-app-canary node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.image-tag }} -n practice-app
-          
-          # Wait for canary to be ready
-          kubectl rollout status deployment/practice-node-app-canary -n practice-app --timeout=300s
+
+          kubectl set image deployment/practice-node-app-prod-canary \
+            node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image.outputs.image-tag }} \
+            -n practice-app-prod
+
+          kubectl rollout status deployment/practice-node-app-prod-canary -n practice-app-prod --timeout=300s
 
       - name: Update ingress for traffic splitting
         run: |
           TRAFFIC_PERCENTAGE=${{ github.event.inputs.traffic_percentage }}
           MAIN_TRAFFIC=$((100 - TRAFFIC_PERCENTAGE))
-          
-          # Patch ingress to split traffic
-          kubectl patch ingress practice-node-app -n practice-app --type='json' -p='[
+
+          kubectl patch ingress practice-node-app-prod -n practice-app-prod --type='json' -p='[
             {
               "op": "replace",
               "path": "/spec/rules/0/http/paths",
@@ -82,48 +90,38 @@ jobs:
                   "path": "/",
                   "pathType": "Prefix",
                   "backend": {
-                    "service": {
-                      "name": "practice-node-app-canary",
-                      "port": {"number": 80}
-                    }
+                    "service": { "name": "practice-node-app-prod-canary", "port": {"number": 80} }
                   },
                   "weight": '$TRAFFIC_PERCENTAGE'
                 },
                 {
                   "path": "/",
-                  "pathType": "Prefix", 
+                  "pathType": "Prefix",
                   "backend": {
-                    "service": {
-                      "name": "practice-node-app",
-                      "port": {"number": 80}
-                    }
+                    "service": { "name": "practice-node-app-prod", "port": {"number": 80} }
                   },
                   "weight": '$MAIN_TRAFFIC'
                 }
               ]
             }
           ]'
-          
-          echo "🚀 Traffic split: $TRAFFIC_PERCENTAGE% canary, $MAIN_TRAFFIC% main"
+
+          echo "Traffic split: $TRAFFIC_PERCENTAGE% canary / $MAIN_TRAFFIC% stable"
 
       - name: Wait for traffic routing
-        run: |
-          echo "⏳ Waiting for traffic routing to take effect..."
-          sleep 30
+        run: sleep 30
 
       - name: Get ALB URL
         id: alb
         run: |
-          ALB_URL=$(kubectl get ingress practice-node-app -n practice-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
           echo "alb-url=$ALB_URL" >> $GITHUB_OUTPUT
 
       - name: Canary health check
         run: |
           ALB_URL="${{ steps.alb.outputs.alb-url }}"
           if [ -n "$ALB_URL" ]; then
-            echo "🔍 Testing canary deployment at $ALB_URL"
-            
-            # Test multiple requests to verify traffic splitting
             SUCCESS_COUNT=0
             for i in {1..20}; do
               if curl -f -s http://$ALB_URL/health > /dev/null; then
@@ -131,42 +129,40 @@ jobs:
               fi
               sleep 2
             done
-            
-            echo "✅ Health check: $SUCCESS_COUNT/20 requests successful"
-            
+            echo "Health check: $SUCCESS_COUNT/20 requests successful"
             if [ $SUCCESS_COUNT -lt 15 ]; then
-              echo "❌ Canary health check failed"
+              echo "Canary health check failed — run this workflow again with action=rollback"
               exit 1
             fi
           else
-            echo "⚠️ No ALB URL available"
+            echo "No ALB URL available"
           fi
 
       - name: Monitor canary metrics
         run: |
-          echo "📊 Monitoring canary deployment for 2 minutes..."
-          
+          echo "Monitoring canary for 2 minutes..."
           for i in {1..12}; do
-            echo "Check $i/12:"
-            kubectl get pods -n practice-app -l app=practice-node-app-canary
-            kubectl get pods -n practice-app -l app=practice-node-app
-            echo "---"
+            echo "--- Check $i/12 ---"
+            kubectl get pods -n practice-app-prod -l app=practice-node-app-prod-canary
             sleep 10
           done
 
-      - name: Promote or rollback
+      - name: Summary
         run: |
-          echo "🤔 Canary deployment is running with ${{ github.event.inputs.traffic_percentage }}% traffic"
-          echo "📝 Manual decision required:"
-          echo "  - To promote: Run 'Promote Canary' workflow"
-          echo "  - To rollback: Run 'Rollback Canary' workflow"
-          echo ""
-          echo "🌐 Test at: ${{ steps.alb.outputs.alb-url }}"
+          echo "## Canary running at ${{ github.event.inputs.traffic_percentage }}% traffic" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ steps.image.outputs.image-tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**ALB:** ${{ steps.alb.outputs.alb-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next steps:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Looks good → re-run this workflow with \`action=promote\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Looks bad  → re-run this workflow with \`action=rollback\`" >> $GITHUB_STEP_SUMMARY
 
   rollback-canary:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'rollback'
-    needs: canary-deploy
+    if: github.event.inputs.action == 'rollback'
+    permissions:
+      contents: read
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -183,10 +179,7 @@ jobs:
 
       - name: Rollback canary
         run: |
-          echo "🔄 Rolling back canary deployment..."
-          
-          # Reset ingress to 100% main traffic
-          kubectl patch ingress practice-node-app -n practice-app --type='json' -p='[
+          kubectl patch ingress practice-node-app-prod -n practice-app-prod --type='json' -p='[
             {
               "op": "replace",
               "path": "/spec/rules/0/http/paths",
@@ -195,25 +188,20 @@ jobs:
                   "path": "/",
                   "pathType": "Prefix",
                   "backend": {
-                    "service": {
-                      "name": "practice-node-app",
-                      "port": {"number": 80}
-                    }
+                    "service": { "name": "practice-node-app-prod", "port": {"number": 80} }
                   }
                 }
               ]
             }
           ]'
-          
-          # Delete canary deployment
-          kubectl delete deployment practice-node-app-canary -n practice-app
-          
-          echo "✅ Canary rollback completed"
+          kubectl delete deployment practice-node-app-prod-canary -n practice-app-prod --ignore-not-found
+          echo "Canary rolled back — 100% traffic on stable"
 
   promote-canary:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'promote'
-    needs: canary-deploy
+    if: github.event.inputs.action == 'promote'
+    permissions:
+      contents: read
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -228,19 +216,15 @@ jobs:
       - name: Configure kubeconfig for EKS
         run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
-      - name: Promote canary
+      - name: Promote canary to stable
         run: |
-          echo "🚀 Promoting canary to main deployment..."
-          
-          # Update main deployment with canary image
-          CANARY_IMAGE=$(kubectl get deployment practice-node-app-canary -n practice-app -o jsonpath='{.spec.template.spec.containers[0].image}')
-          kubectl set image deployment/practice-node-app node-app=$CANARY_IMAGE -n practice-app
-          
-          # Wait for main deployment to update
-          kubectl rollout status deployment/practice-node-app -n practice-app --timeout=300s
-          
-          # Reset ingress to 100% main traffic
-          kubectl patch ingress practice-node-app -n practice-app --type='json' -p='[
+          CANARY_IMAGE=$(kubectl get deployment practice-node-app-prod-canary -n practice-app-prod \
+            -o jsonpath='{.spec.template.spec.containers[0].image}')
+
+          kubectl set image deployment/practice-node-app-prod node-app=$CANARY_IMAGE -n practice-app-prod
+          kubectl rollout status deployment/practice-node-app-prod -n practice-app-prod --timeout=300s
+
+          kubectl patch ingress practice-node-app-prod -n practice-app-prod --type='json' -p='[
             {
               "op": "replace",
               "path": "/spec/rules/0/http/paths",
@@ -249,17 +233,12 @@ jobs:
                   "path": "/",
                   "pathType": "Prefix",
                   "backend": {
-                    "service": {
-                      "name": "practice-node-app",
-                      "port": {"number": 80}
-                    }
+                    "service": { "name": "practice-node-app-prod", "port": {"number": 80} }
                   }
                 }
               ]
             }
           ]'
-          
-          # Delete canary deployment
-          kubectl delete deployment practice-node-app-canary -n practice-app
-          
-          echo "✅ Canary promotion completed"
+          kubectl delete deployment practice-node-app-prod-canary -n practice-app-prod --ignore-not-found
+
+          echo "Canary promoted — 100% traffic on $CANARY_IMAGE"

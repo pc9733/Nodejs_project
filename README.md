@@ -18,17 +18,12 @@ These helper scripts handle backend bootstrapping (S3 bucket + DynamoDB table), 
 
 ### 2. Deploy Application
 ```bash
-# Option A: Automated (Recommended)
-# Trigger GitHub Actions workflow: deploy-node-app.yml
-
-# Option B: Manual
-kubectl apply -f k8s/namespace.yaml \
-  -f k8s/deployment.yaml \
-  -f k8s/service.yaml \
-  -f k8s/ingress.yaml
+# Dev deploys automatically after every push to develop.
+# For prod, trigger manually via GitHub Actions:
+#   Actions → Deploy to Production → Run workflow
 
 # Get ALB endpoint
-kubectl get ingress practice-node-app -n practice-app
+kubectl get ingress practice-node-app-prod -n practice-app-prod
 ```
 
 ## �📁 Repository Structure
@@ -82,8 +77,8 @@ kubectl get ingress practice-node-app -n practice-app
 
 | Environment | Namespace | Replicas | Resources | Ingress |
 |-------------|-----------|----------|-----------|---------|
-| **Staging** | `practice-app-staging` | 1 | Minimal | Internal |
-| **Production** | `practice-app-prod` | 3 | High | ALB |
+| **Development** | `practice-app-dev` | 2 | Low | NGINX |
+| **Production** | `practice-app-prod` | 3–10 (HPA) | High | ALB (internet-facing) |
 
 ## 🛠️ Common Commands
 
@@ -98,25 +93,25 @@ terraform apply            # Apply changes
 ### Kubernetes
 ```bash
 # View resources
-kubectl get all -n practice-app
+kubectl get all -n practice-app-dev
+kubectl get all -n practice-app-prod
 
 # Debug issues
-kubectl describe pod <name> -n practice-app
-kubectl logs -f deployment/practice-node-app -n practice-app
-
-# Scale application
-kubectl scale deployment practice-node-app --replicas=3 -n practice-app
+kubectl describe pod <name> -n practice-app-prod
+kubectl logs -f deployment/practice-node-app-prod -n practice-app-prod
 
 # Port forward for local testing
-kubectl port-forward service/practice-node-app 3000:80 -n practice-app
+kubectl port-forward service/practice-node-app-dev 3000:80 -n practice-app-dev
 ```
 
-## � Documentation
+## 📖 Documentation
 
+- **[Workflows & Branching](docs/WORKFLOWS.md)** - How CI/CD works, when to use each workflow
 - **[Infrastructure Guide](docs/INFRASTRUCTURE.md)** - AWS infrastructure details
 - **[Kubernetes Guide](docs/KUBERNETES.md)** - Application manifests and examples
-- **[CI/CD Documentation](docs/CICD.md)** - Pipeline configuration and usage
 - **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[Fresh AWS Account Setup](docs/FRESH_AWS_ACCOUNT_SETUP.md)** - First-time setup guide
+- **[Parameter Store Setup](docs/PARAMETER_STORE_SETUP.md)** - Secret management
 
 ## 💰 Cost Optimization
 

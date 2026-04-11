@@ -1,22 +1,22 @@
 name: Node CI
 
 on:
-  # Run on pull requests to main branches
+  # Run on every push to feature branches, develop, and main
+  push:
+    branches:
+      - 'feature/**'
+      - develop
+      - main
+    paths:
+      - 'node-app/**'
+      - '.github/workflows/node-ci.yml'
+
+  # Run on PRs targeting develop or main (must pass before merge)
   pull_request:
     branches: [ develop, main ]
     paths:
       - 'node-app/**'
-      - 'Dockerfile'
-      - 'package*.json'
       - '.github/workflows/node-ci.yml'
-
-  # Run on push to develop (only if app code changes)
-  push:
-    branches: [ develop ]
-    paths:
-      - 'node-app/**'
-      - 'Dockerfile'
-      - 'package*.json'
 
   # Allow manual trigger
   workflow_dispatch:
