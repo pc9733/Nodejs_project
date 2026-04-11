@@ -1,19 +1,26 @@
 name: Promote to Production
 
+# Use this when a dev image has already been validated and you want to promote
+# it to prod WITHOUT rebuilding. The image built from develop-<sha> is retagged
+# as main-<sha> in the prod ECR and deployed — no source rebuild needed.
+#
+# Use deploy-prod.yml instead when you want a clean build from main HEAD.
+
 on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: 'Commit SHA to promote (leave empty for latest develop)'
-        required: false
+        description: 'Short commit SHA to promote (e.g. a1b2c3d) — must exist as develop-<sha> in dev ECR'
+        required: true
       approve_promotion:
-        description: 'Type "promote-production" to confirm production promotion'
+        description: 'Type "promote-production" to confirm'
         required: true
         default: 'cancel'
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: practice-node-app-prod
+  ECR_REPOSITORY_DEV: practice-node-app-dev
+  ECR_REPOSITORY_PROD: practice-node-app-prod
   EKS_CLUSTER_NAME: practice-node-app-prod
 
 jobs:
@@ -22,55 +29,19 @@ jobs:
     permissions:
       contents: read
       packages: write
-      actions: read
       security-events: write
-      pull-requests: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get promotion details
-        id: promotion
-        run: |
-          if [ -n "${{ github.event.inputs.commit_sha }}" ]; then
-            COMMIT_SHA="${{ github.event.inputs.commit_sha }}"
-            BRANCH="develop"
-          else
-            COMMIT_SHA=$(git rev-parse origin/develop)
-            BRANCH="develop"
-          fi
-          
-          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
-          echo "source_branch=$BRANCH" >> $GITHUB_OUTPUT
-          
-          echo "🚀 Promoting commit $COMMIT_SHA from $BRANCH to production"
-
-      - name: Confirm promotion
+      - name: Manual approval
         run: |
           if [ "${{ github.event.inputs.approve_promotion }}" != "promote-production" ]; then
-            echo "❌ Promotion not confirmed. Type 'promote-production' to confirm."
+            echo "Promotion not confirmed. Type 'promote-production' to confirm."
             exit 1
           fi
-          
-          echo "✅ Production promotion confirmed!"
+          echo "Production promotion confirmed!"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-          cache: npm
-          cache-dependency-path: node-app/package-lock.json
-
-      - name: Install dependencies
-        working-directory: node-app
-        run: npm ci --omit=dev
-
-      - name: Run tests
-        working-directory: node-app
-        run: npm test || echo "No tests configured, skipping..."
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -83,34 +54,42 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix=develop-
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Verify source image exists in dev ECR
+        id: tags
+        run: |
+          SHA="${{ github.event.inputs.commit_sha }}"
+          DEV_TAG="develop-${SHA}"
+          PROD_TAG="main-${SHA}"
+          DEV_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_DEV }}:${DEV_TAG}"
+          PROD_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_PROD }}:${PROD_TAG}"
 
-      - name: Build and promote image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./node-app
-          file: ./node-app/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          if ! aws ecr describe-images \
+              --repository-name ${{ env.ECR_REPOSITORY_DEV }} \
+              --image-ids imageTag=$DEV_TAG \
+              --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            echo "Image ${DEV_IMAGE} not found in dev ECR."
+            echo "Make sure the commit was deployed to dev before promoting."
+            exit 1
+          fi
+
+          echo "dev-tag=$DEV_TAG" >> $GITHUB_OUTPUT
+          echo "prod-tag=$PROD_TAG" >> $GITHUB_OUTPUT
+          echo "dev-image=$DEV_IMAGE" >> $GITHUB_OUTPUT
+          echo "prod-image=$PROD_IMAGE" >> $GITHUB_OUTPUT
+          echo "Source image verified: $DEV_IMAGE"
+
+      - name: Retag image from dev ECR to prod ECR
+        run: |
+          # Pull the validated dev image and push it to prod ECR under a prod tag
+          docker pull ${{ steps.tags.outputs.dev-image }}
+          docker tag  ${{ steps.tags.outputs.dev-image }} ${{ steps.tags.outputs.prod-image }}
+          docker push ${{ steps.tags.outputs.prod-image }}
+          echo "Retagged ${{ steps.tags.outputs.dev-tag }} → ${{ steps.tags.outputs.prod-tag }} in prod ECR"
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.16.1
-        continue-on-error: true
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          image-ref: ${{ steps.tags.outputs.prod-image }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
@@ -126,132 +105,56 @@ jobs:
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
-      - name: Verify image in ECR
-        run: |
-          IMAGE_TAG="latest"
-          FULL_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
-          
-          if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
-            echo "✅ Image $FULL_IMAGE found in ECR"
-          else
-            echo "❌ Image $FULL_IMAGE not found in ECR"
-            echo "Available images:"
-            aws ecr list-images --repository-name ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }} --query 'imageIds[].imageTag' --output table
-            exit 1
-          fi
-
-      - name: Save previous deployment
+      - name: Save previous deployment for rollback
         id: backup
         run: |
           if kubectl get deployment practice-node-app-prod -n practice-app-prod 2>/dev/null; then
             echo "backup-saved=true" >> $GITHUB_OUTPUT
-            echo "✅ Backup saved"
           else
             echo "backup-saved=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No existing deployment found"
           fi
 
       - name: Deploy to production
         run: |
-          echo "🚀 Promoting to production environment..."
-          
-          # Apply production manifests
           kubectl apply -f k8s/environments/prod/all-in-one.yaml
-          
-          # Update deployment with promoted image
-          kubectl set image deployment/practice-node-app-prod node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app-prod
-          
-          echo "✅ Production promotion completed!"
+          kubectl set image deployment/practice-node-app-prod \
+            node-app=${{ steps.tags.outputs.prod-image }} \
+            -n practice-app-prod
 
       - name: Wait for rollout
-        run: |
-          echo "⏳ Waiting for deployment rollout..."
-          kubectl rollout status deployment/practice-node-app-prod -n practice-app-prod --timeout=600s
+        run: kubectl rollout status deployment/practice-node-app-prod -n practice-app-prod --timeout=600s
 
       - name: Health check
         run: |
-          echo "🔍 Performing health check..."
-          kubectl wait --for=condition=ready pod -l app=practice-node-app-prod -n practice-app-prod --timeout=300s
-          
-          # Get ALB URL
-          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-          
+          kubectl wait --for=condition=ready pod \
+            -l app=practice-node-app-prod -n practice-app-prod --timeout=300s
+
+          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+
           if [ -n "$ALB_URL" ]; then
-            echo "🌐 Testing ALB endpoint..."
             for i in {1..10}; do
               if curl -f -s http://$ALB_URL/health > /dev/null; then
-                echo "✅ ALB health check passed"
+                echo "ALB health check passed"
                 break
               fi
-              echo "⏳ Waiting for ALB to be ready... ($i/10)"
+              echo "Waiting for ALB... ($i/10)"
               sleep 30
             done
-          fi
-
-      - name: Performance test
-        run: |
-          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-          
-          if [ -n "$ALB_URL" ]; then
-            echo "🚀 Running performance test against $ALB_URL"
-            
-            # Install k6
-            K6_VERSION="v0.55.0"
-            curl -L -o k6.tar.gz "https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-amd64.tar.gz"
-            tar -xzf k6.tar.gz
-            sudo mv k6-${K6_VERSION}-linux-amd64/k6 /usr/local/bin/
-            
-            # Create k6 script
-            echo 'import http from "k6/http";' > load-test.js
-            echo 'import { check } from "k6";' >> load-test.js
-            echo 'export let options = {' >> load-test.js
-            echo '  stages: [{ duration: "2m", target: 10 }, { duration: "2m", target: 10 }, { duration: "1m", target: 0 }],' >> load-test.js
-            echo '  thresholds: { http_req_duration: ["p(95)<500"], http_req_failed: ["rate<0.1"] }' >> load-test.js
-            echo '};' >> load-test.js
-            echo 'export default function() { let response = http.get("http://'$ALB_URL'/health"); check(response, { "status was 200": (r) => r.status == 200 }); }' >> load-test.js
-            
-            # Run load test
-            k6 run --out json=load-test-results.js load-test.js
-          else
-            echo "⚠️ No ALB URL available, skipping performance test"
-          fi
-
-      - name: Get deployment info
-        run: |
-          echo "📊 Production Promotion Information:"
-          kubectl get pods -n practice-app-prod -l app=practice-node-app-prod
-          kubectl get services -n practice-app-prod
-          kubectl get ingress -n practice-app-prod
-          kubectl get hpa -n practice-app-prod
-          
-          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-          if [ -n "$ALB_URL" ]; then
-            echo "🌐 Production URL: http://$ALB_URL"
           fi
 
       - name: Rollback on failure
         if: failure()
         run: |
           if [ "${{ steps.backup.outputs.backup-saved }}" == "true" ]; then
-            echo "🔄 Rolling back production deployment..."
             kubectl rollout undo deployment/practice-node-app-prod -n practice-app-prod || true
-            echo "✅ Rollback completed"
-          else
-            echo "⚠️ No backup available, manual rollback may be needed"
           fi
 
-      - name: Notify promotion team
+      - name: Summary
         if: always()
         run: |
-          ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-          
-          if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Production promotion successful!"
-            echo "🌐 Production URL: http://$ALB_URL"
-            echo "📊 Promoted commit: ${{ steps.promotion.outputs.commit_sha }}"
-            echo "📋 Source branch: ${{ steps.promotion.outputs.source_branch }}"
-          else
-            echo "❌ Production promotion failed!"
-            echo "🔍 Check the workflow logs for details"
-            echo "🔄 Rollback initiated automatically"
-          fi
+          echo "## Promote to Production" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dev tag:** \`${{ steps.tags.outputs.dev-tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Prod tag:** \`${{ steps.tags.outputs.prod-tag }}\`" >> $GITHUB_STEP_SUMMARY

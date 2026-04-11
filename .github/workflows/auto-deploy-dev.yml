@@ -13,8 +13,10 @@ env:
 
 jobs:
   deploy:
-    # Only deploy if tests passed
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only deploy on push to develop (not on PRs), and only if tests passed
+    if: |
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -73,8 +75,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.16.1
-        continue-on-error: true
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image_tag.outputs.tag }}
           format: 'sarif'

@@ -26,6 +26,14 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Manual approval for production deployment
+        run: |
+          if [ "${{ github.event.inputs.approve_deployment }}" != "deploy-production" ]; then
+            echo "❌ Production deployment not approved. Type 'deploy-production' to confirm."
+            exit 1
+          fi
+          echo "✅ Production deployment approved!"
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -42,7 +50,7 @@ jobs:
 
       - name: Run tests
         working-directory: node-app
-        run: npm test || echo "No tests configured, skipping..."
+        run: npm test
 
       - name: Run smoke test
         working-directory: node-app
@@ -59,18 +67,13 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix={{branch}}-
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Determine image tag
+        id: image_tag
+        run: |
+          TAG="main-$(echo ${{ github.sha }} | cut -c1-7)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          echo "Using image tag: $TAG"
 
       - name: Build and push image
         uses: docker/build-push-action@v5
@@ -78,16 +81,14 @@ jobs:
           context: ./node-app
           file: ./node-app/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image_tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.16.1
-        continue-on-error: true
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image_tag.outputs.tag }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
@@ -100,22 +101,14 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
-      - name: Manual approval for production deployment
-        run: |
-          if [ "${{ github.event.inputs.approve_deployment }}" != "deploy-production" ]; then
-            echo "❌ Production deployment not approved. Type 'deploy-production' to confirm."
-            exit 1
-          fi
-          echo "✅ Production deployment approved!"
-
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
       - name: Verify image in ECR
         run: |
-          IMAGE_TAG="latest"
+          IMAGE_TAG="${{ steps.image_tag.outputs.tag }}"
           FULL_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
-          
+
           if aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} --image-ids imageTag=$IMAGE_TAG --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
             echo "✅ Image $FULL_IMAGE found in ECR"
           else
@@ -143,8 +136,8 @@ jobs:
           # Apply production manifests
           kubectl apply -f k8s/environments/prod/all-in-one.yaml
           
-          # Update deployment with latest image
-          kubectl set image deployment/practice-node-app-prod node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest -n practice-app-prod
+          # Update deployment with immutable SHA-tagged image
+          kubectl set image deployment/practice-node-app-prod node-app=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image_tag.outputs.tag }} -n practice-app-prod
           
           echo "✅ Production deployment completed!"
 
@@ -238,9 +231,10 @@ jobs:
         if: always()
         run: |
           ALB_URL=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-          
+
           if [ "${{ job.status }}" == "success" ]; then
             echo "✅ Production deployment successful!"
+            echo "🏷️  Image tag: ${{ steps.image_tag.outputs.tag }}"
             echo "🌐 Production URL: http://$ALB_URL"
             echo "📊 View metrics: kubectl top pods -n practice-app-prod"
             echo "📋 View logs: kubectl logs -f deployment/practice-node-app-prod -n practice-app-prod"

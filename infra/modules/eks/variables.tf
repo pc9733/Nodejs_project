@@ -14,8 +14,14 @@ variable "kubernetes_version" {
 }
 
 variable "subnet_ids" {
-  description = "List of subnet IDs for the EKS cluster"
+  description = "List of subnet IDs for the EKS control plane (include both public and private for HA)."
   type        = list(string)
+}
+
+variable "node_group_subnet_ids" {
+  description = "Subnet IDs for worker nodes. Should be private subnets so nodes are not directly internet-reachable. Defaults to subnet_ids when not set."
+  type        = list(string)
+  default     = []
 }
 
 variable "endpoint_public_access" {

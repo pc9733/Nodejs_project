@@ -124,6 +124,8 @@ metadata:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80,"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS-1-2-2017-01"
+    # TODO: set this to your ACM certificate ARN to enable HTTPS termination
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:602202572057:certificate/<cert-id>
     alb.ingress.kubernetes.io/healthcheck-path: "/health"
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
     alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
@@ -271,10 +273,15 @@ spec:
   - Ingress
   - Egress
   ingress:
+  # Allow traffic from the ALB (IP target mode — packets arrive from VPC CIDR, not a K8s namespace)
   - from:
-    - namespaceSelector:
-        matchLabels:
-          name: ingress-nginx
+    - ipBlock:
+        cidr: 10.2.0.0/16
+    ports:
+    - protocol: TCP
+      port: 3000
+  # Allow pod-to-pod traffic within the namespace (health checks, internal calls)
+  - from:
     - podSelector:
         matchLabels:
           app: practice-node-app-prod
@@ -314,10 +321,11 @@ metadata:
     environment: production
 spec:
   hard:
-    requests.cpu: "2"
-    requests.memory: "2Gi"
-    limits.cpu: "4"
-    limits.memory: "4Gi"
+    # Sized for HPA max (10 replicas × 200m cpu / 256Mi mem requests, × 500m cpu / 512Mi mem limits)
+    requests.cpu: "3"
+    requests.memory: "3Gi"
+    limits.cpu: "6"
+    limits.memory: "6Gi"
     persistentvolumeclaims: "5"
     services: "10"
     secrets: "10"
