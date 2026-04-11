@@ -13,11 +13,11 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "practice-node-app-terraform-state-prod"
+    bucket         = "practice-node-app-terraform-state-602202572057-prod"
     key            = "prod/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "practice-node-app-terraform-locks-prod"
+    dynamodb_table = "practice-node-app-terraform-locks-602202572057-prod"
   }
 }
 

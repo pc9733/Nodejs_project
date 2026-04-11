@@ -50,6 +50,20 @@ variable "kubernetes_version" {
   default     = "1.30"
 }
 
+variable "dev_api_key" {
+  description = "API key for development environment"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "dev_jwt_secret" {
+  description = "JWT secret for development environment"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "tags" {
   description = "Common tags for all resources"
   type        = map(string)

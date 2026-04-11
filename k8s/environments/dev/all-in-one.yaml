@@ -36,7 +36,7 @@ spec:
     spec:
       containers:
       - name: node-app
-        image: 852994641319.dkr.ecr.us-east-1.amazonaws.com/practice-node-app-dev:latest
+        image: 602202572057.dkr.ecr.us-east-1.amazonaws.com/practice-node-app-dev:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
@@ -136,19 +136,49 @@ data:
   REDIS_PORT: "6379"
 
 ---
-# Development Secrets
-apiVersion: v1
-kind: Secret
+# Development Secrets - Fetched from AWS Parameter Store via External Secrets Operator
+# IMPORTANT: Secrets are no longer hardcoded. They are pulled from AWS Systems Manager Parameter Store.
+# Prerequisites:
+#   1. External Secrets Operator must be installed (handled by Terraform)
+#   2. Parameters must exist in AWS SSM Parameter Store at:
+#      - /practice-node-app-dev/dev/db-password
+#      - /practice-node-app-dev/dev/api-key
+#      - /practice-node-app-dev/dev/jwt-secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: practice-app-secrets-dev
   namespace: practice-app-dev
   labels:
     environment: development
-type: Opaque
-data:
-  DB_PASSWORD: ZGV2LXBhc3N3b3JkMTIz  # base64: "dev-password123"
-  API_KEY: ZGV2LWFwaS1rZXktc2VjcmV0  # base64: "dev-api-key-secret"
-  JWT_SECRET: ZGV2LWp3dC1zZWNyZXQta2V5  # base64: "dev-jwt-secret-key"
+spec:
+  secretStoreRef:
+    name: aws-parameter-store-dev
+    kind: SecretStore
+  target:
+    name: practice-app-secrets-dev
+    creationPolicy: Owner
+  refreshInterval: 1h
+  data:
+    - secretKey: DB_PASSWORD
+      remoteRef:
+        key: /practice-node-app-dev/dev/db-password
+    - secretKey: API_KEY
+      remoteRef:
+        key: /practice-node-app-dev/dev/api-key
+    - secretKey: JWT_SECRET
+      remoteRef:
+        key: /practice-node-app-dev/dev/jwt-secret
+
+---
+# ServiceAccount for External Secrets Operator (required for IRSA)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets
+  namespace: practice-app-dev
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::602202572057:role/practice-node-app-dev-external-secrets-operator
 
 ---
 
@@ -160,6 +190,42 @@ metadata:
   labels:
     app: datadog-agent
     environment: development
+
+---
+# ServiceAccount for External Secrets in Datadog namespace
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets
+  namespace: datadog
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::602202572057:role/practice-node-app-dev-external-secrets-operator
+
+---
+# Datadog Secrets - Fetched from AWS Parameter Store
+# Parameters must exist at:
+#   - /practice-node-app-dev/dev/datadog-api-key
+#   - /practice-node-app-dev/dev/datadog-app-key
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: datadog-secret
+  namespace: datadog
+spec:
+  secretStoreRef:
+    name: aws-parameter-store-datadog
+    kind: SecretStore
+  target:
+    name: datadog-secret
+    creationPolicy: Owner
+  refreshInterval: 1h
+  data:
+    - secretKey: api-key
+      remoteRef:
+        key: /practice-node-app-dev/dev/datadog-api-key
+    - secretKey: app-key
+      remoteRef:
+        key: /practice-node-app-dev/dev/datadog-app-key
 
 ---
 apiVersion: datadoghq.com/v2alpha1

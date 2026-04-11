@@ -1,27 +1,75 @@
 # CI/CD Pipeline Documentation
 
-## Workflow Catalog
+## 🎯 Overview
+
+This project uses **GitHub Actions** for CI/CD with intelligent trigger mechanisms to save CI minutes while maintaining fast feedback loops. Workflows are designed to be **intentional** rather than automatic, with specific controls for different stages.
+
+---
+
+## 📋 Workflow Catalog
 
 | Workflow | File | Trigger(s) | Purpose |
 |----------|------|------------|---------|
-| Node CI | `.github/workflows/node-ci.yml` | Pushes to `develop`, `feature/*`, `hotfix/*` (docs ignored) and PRs to `develop` | Run Node.js install, unit tests, and a smoke test without touching infrastructure.
-| Deploy to Development | `.github/workflows/deploy-dev.yml` | Manual `workflow_dispatch` | Builds an image and deploys the latest tag into the dev namespace/cluster.
-| Deploy to Production | `.github/workflows/deploy-prod.yml` | Manual `workflow_dispatch` + approval text | Builds image, deploys manifests to prod, runs health/perf gates.
-| Canary Deployment | `.github/workflows/canary-deploy.yml` | Manual `workflow_dispatch` | Spin up a canary deployment and split traffic via ingress weights.
-| Promote to Production | `.github/workflows/promote-to-prod.yml` | Manual `workflow_dispatch` + approval text | Promote a specific commit from `develop` to prod after validation.
-| Terraform Plan | `.github/workflows/terraform-plan.yml` | Manual `workflow_dispatch` or PRs touching `infra/**` | Generate a Terraform plan per environment and publish the artifact/PR comment.
-| Terraform Apply | `.github/workflows/terraform-apply.yml` | Manual `workflow_dispatch` only | Run Terraform plan+apply for dev/prod when `auto_approve=true`.
-| Terraform Destroy | `.github/workflows/terraform-destroy.yml` | Manual `workflow_dispatch` only | Tear down an environment after explicit confirmation phrases.
-| Legacy Deploy | `.github/workflows/deploy-node-app.yml` | Manual `workflow_dispatch` | Old one-shot workflow for the monolithic namespace; kept for reference only.
+| **Node CI** | `.github/workflows/node-ci.yml` | PRs to `develop`/`main`, pushes to `develop` (app code only), manual | Run Node.js install, unit tests, and smoke test. Supports `[skip ci]` flag.
+| **Auto Deploy Dev** 🆕 | `.github/workflows/auto-deploy-dev.yml` | After successful Node CI on `develop` | Automatically builds image and deploys to dev cluster after tests pass.
+| **Deploy to Development** | `.github/workflows/deploy-dev.yml` | Manual `workflow_dispatch` | Manually builds an image and deploys specific tag to dev namespace/cluster.
+| **Deploy to Production** | `.github/workflows/deploy-prod.yml` | Manual `workflow_dispatch` + approval text | Builds image, deploys manifests to prod, runs health/perf gates.
+| **Canary Deployment** | `.github/workflows/canary-deploy.yml` | Manual `workflow_dispatch` | Spin up canary deployment and split traffic via ingress weights.
+| **Promote to Production** | `.github/workflows/promote-to-prod.yml` | Manual `workflow_dispatch` + approval text | Promote specific commit from `develop` to prod after validation.
+| **Terraform Plan** | `.github/workflows/terraform-plan.yml` | Manual `workflow_dispatch` or PRs touching `infra/**` | Generate Terraform plan per environment and publish artifact/PR comment.
+| **Terraform Apply** | `.github/workflows/terraform-apply.yml` | Manual `workflow_dispatch` only | Run Terraform plan+apply for dev/prod when `auto_approve=true`.
+| **Terraform Destroy** | `.github/workflows/terraform-destroy.yml` | Manual `workflow_dispatch` only | Tear down environment after explicit confirmation phrases.
+| **Legacy Deploy** | `.github/workflows/deploy-node-app.yml` | Manual `workflow_dispatch` | Old one-shot workflow for monolithic namespace; kept for reference only.
 
-> **Key change:** Pushes to `develop` no longer deploy or run Terraform. They only run the `Node CI` workflow. Deployments and Terraform applies must now be triggered intentionally.
+---
+
+## 🚦 Trigger Strategy Summary
+
+### **Automatic Triggers**
+- ✅ **Node CI**: Runs on PRs and `develop` pushes (app code only)
+- ✅ **Auto Deploy Dev**: Runs after successful Node CI on `develop`
+- ✅ **Terraform Plan**: Runs on PRs touching `infra/**`
+
+### **Manual Triggers**
+- 🔒 **All production deployments** (safety)
+- 🔒 **All Terraform apply/destroy** (safety)
+- 🔧 **All workflows** can be manually triggered via `workflow_dispatch`
+
+### **Skip Controls**
+- 🚫 Add `[skip ci]` or `[ci skip]` to commit messages to skip CI
+- 📝 See [`.github/COMMIT_CONVENTIONS.md`](../.github/COMMIT_CONVENTIONS.md) for details
+
+---
 
 ## Workflow Details
 
-### Node CI (`node-ci.yml`)
-- **Why**: Ensures every push/PR still runs Node.js tests without automatically touching AWS or Kubernetes.
+### Node CI (`node-ci.yml`) 🔄 UPDATED
+- **Triggers**:
+  - Pull requests to `develop` or `main` branches
+  - Pushes to `develop` branch (only when app code changes)
+  - Manual trigger via workflow_dispatch
+  - **Skipped** when commit contains `[skip ci]` or `[ci skip]`
+- **Path Filters**: Only runs when these files change:
+  - `node-app/**`
+  - `Dockerfile`
+  - `package*.json`
+  - `.github/workflows/node-ci.yml`
 - **Steps**: Checkout → `setup-node@v4` → `npm ci` (full dev install) → `npm test` (non-blocking if no tests) → smoke test by requiring `server.js`.
-- **Notes**: `paths-ignore` skips docs-only pushes, keeping the pipeline fast.
+- **Why**: Ensures tests run on all PRs and develop pushes, but skips CI for feature branch pushes and docs-only changes to save CI minutes.
+
+### Auto Deploy to Development (`auto-deploy-dev.yml`) 🆕 NEW
+- **Triggers**: Automatically runs after successful `Node CI` workflow on `develop` branch
+- **Condition**: Only deploys if tests passed
+- **Steps**:
+  1. Build Docker image with tag `develop-{short-sha}`
+  2. Push to ECR repository `practice-node-app-dev`
+  3. Run Trivy vulnerability scan
+  4. Apply `k8s/environments/dev/all-in-one.yaml` manifests
+  5. Update deployment with new image
+  6. Wait for rollout and perform health checks
+  7. Clean up old ECR images (keep last 10)
+- **Why**: Provides continuous deployment to dev environment after tests pass, enabling fast feedback loop without manual intervention.
+- **Note**: This is separate from the manual `deploy-dev.yml` workflow, which can still be used to deploy specific image tags.
 
 ### Deploy to Development (`deploy-dev.yml`)
 - **Trigger**: Manual input for `image_tag` (defaults to `latest`).
@@ -59,17 +107,193 @@
 - **Status**: Kept for historical reference; still available via manual dispatch but not recommended for multi-env setups.
 - **Behavior**: Applies everything under `k8s/` to the shared namespace and updates the single deployment image.
 
-## Recommended Release Flow
+## 🚀 Recommended Release Flow
 
-1. **Developers push code** → `Node CI` runs automatically (tests + smoke). Fix failures before opening PRs.
-2. **Infra changes?** → Open a PR; `Terraform Plan` posts the plan automatically for review. Iterate until approved.
-3. **Merge to `develop`** → Nothing deploys automatically. When ready, manually:
-   1. Run `deploy-dev.yml` (select image tag if you need an older artifact).
-   2. Smoke-test the app / run any QA checks in dev.
-   3. If Terraform changes are needed, trigger `terraform-apply.yml` for the relevant environment with `auto_approve=true`.
-4. **Preparing prod**:
-   - Option A: Run a canary via `canary-deploy.yml`, monitor, then `promote-to-prod.yml`.
-   - Option B: Run `deploy-prod.yml` directly with the approval passphrase.
-5. **Cleanup**: When an environment must be torn down, run `terraform-destroy.yml` with the required confirmations.
+### **Development Flow** (Feature → Dev)
 
-This separation keeps CI fast, makes deployments intentional, and prevents Terraform from running on every push while still documenting a clear path from commit → dev → prod.
+1. **Create feature branch**
+   ```bash
+   git checkout -b feature/user-dashboard
+   ```
+
+2. **Work in progress commits** (skip CI to save minutes)
+   ```bash
+   git commit -m "wip: scaffold dashboard [skip ci]"
+   git push origin feature/user-dashboard
+   ```
+   - ℹ️ No CI runs on feature branch pushes
+
+3. **Ready for review** - Create Pull Request
+   ```bash
+   gh pr create --base develop --title "Add user dashboard"
+   ```
+   - ✅ **Node CI** runs automatically on PR
+   - ✅ Tests must pass before merge
+
+4. **Merge to `develop`**
+   ```bash
+   gh pr merge
+   ```
+   - ✅ **Node CI** runs on merge commit
+   - ✅ **Auto Deploy Dev** triggers after CI passes
+   - ✅ Application automatically deployed to dev cluster
+   - 📊 Check deployment status in GitHub Actions
+
+5. **Test in dev environment**
+   ```bash
+   kubectl get pods -n practice-app-dev
+   kubectl logs -f deployment/practice-node-app-dev -n practice-app-dev
+   ```
+
+### **Infrastructure Changes Flow**
+
+1. **Update Terraform code**
+   ```bash
+   git checkout -b infra/add-cluster-autoscaler
+   # Make changes to infra/**
+   git commit -m "feat(infra): add cluster autoscaler"
+   git push
+   ```
+
+2. **Create PR** → **Terraform Plan** runs automatically
+   - 📋 Plan posted as PR comment
+   - 👀 Review infrastructure changes
+
+3. **After merge** → Manually apply Terraform
+   - Go to Actions → **Terraform Apply**
+   - Select environment (`dev` or `prod`)
+   - Set `auto_approve=true`
+   - Confirm and run
+
+### **Production Deployment Flow**
+
+#### **Option A: Standard Deployment**
+
+1. **Verify dev deployment is stable**
+   ```bash
+   kubectl get deployment practice-node-app-dev -n practice-app-dev
+   ```
+
+2. **Manual deployment to prod**
+   - Go to Actions → **Deploy to Production**
+   - Enter approval: `deploy-production`
+   - Workflow builds image, runs tests, deploys to prod
+
+#### **Option B: Canary Deployment** (Recommended)
+
+1. **Create canary**
+   - Go to Actions → **Canary Deployment**
+   - Set traffic percentage (e.g., `10`)
+   - Specify image tag (optional)
+   - Run workflow
+
+2. **Monitor canary metrics**
+   ```bash
+   kubectl get pods -n practice-app-prod -l app=practice-node-app-canary
+   # Check Datadog/Grafana metrics
+   ```
+
+3. **Promote or rollback**
+   - If metrics look good → **Promote to Production** workflow
+   - If issues detected → **Rollback** (delete canary deployment)
+
+### **Complete Flow Diagram**
+
+```
+Feature Branch
+    ↓
+[WIP commits with [skip ci]]  ← No CI runs
+    ↓
+Create PR to develop
+    ↓
+[Node CI runs]  ← Tests, smoke test
+    ↓
+Merge to develop
+    ↓
+[Node CI runs]  ← Tests pass
+    ↓
+[Auto Deploy Dev]  ← Automatic deployment
+    ↓
+[Test in dev]  ← Manual QA
+    ↓
+[Deploy to Prod]  ← Manual trigger
+    ↓
+Production ✅
+```
+
+---
+
+## 🎯 Trigger Matrix (Quick Reference)
+
+| Event | Node CI | Auto Deploy Dev | Terraform Plan | Notes |
+|-------|---------|----------------|----------------|-------|
+| Push to `feature/foo` | ❌ No | ❌ No | ❌ No | Work on feature branch |
+| Push to `feature/foo` with `[skip ci]` | ❌ No | ❌ No | ❌ No | Explicit skip |
+| Push to `develop` (app code) | ✅ Yes | ✅ Yes* | ❌ No | Auto CI + deploy |
+| Push to `develop` (docs only) | ❌ No | ❌ No | ❌ No | Path filter |
+| Push to `develop` with `[skip ci]` | ❌ No | ❌ No | ❌ No | Explicit skip |
+| Create PR to `develop` | ✅ Yes | ❌ No | 🟡 If infra | Always test PRs |
+| Update PR (push to PR branch) | ✅ Yes | ❌ No | 🟡 If infra | Re-test changes |
+| Merge PR to `develop` | ✅ Yes | ✅ Yes* | ❌ No | Auto CI + deploy |
+| Push to `main` | ✅ Yes | ❌ No | ❌ No | CI only, no auto-deploy |
+| Manual trigger (any workflow) | ✅ Yes | ✅ Yes | ✅ Yes | Always available |
+
+\* Auto Deploy Dev only runs if Node CI succeeds
+
+---
+
+## 📝 Best Practices
+
+### **Commit Messages**
+- ✅ Use conventional commit format: `type(scope): subject`
+- ✅ Add `[skip ci]` for WIP/docs commits
+- ✅ Reference issues: `Closes #123`
+- 📖 See [`.github/COMMIT_CONVENTIONS.md`](../.github/COMMIT_CONVENTIONS.md)
+
+### **CI/CD Workflow**
+- ✅ Always create PRs for code review
+- ✅ Let CI pass before merging
+- ✅ Test in dev before deploying to prod
+- ✅ Use canary deployments for risky changes
+- ❌ Don't skip CI for actual code changes
+- ❌ Don't push directly to `main`
+
+### **Infrastructure Changes**
+- ✅ Review Terraform plan in PR comments
+- ✅ Apply Terraform manually after merge
+- ✅ Test infra changes in dev first
+- ❌ Don't auto-apply Terraform on pushes
+
+---
+
+## 🔧 Troubleshooting
+
+### **CI not running on my PR**
+- Check if commit contains `[skip ci]`
+- Verify PR is targeting `develop` or `main`
+- Check if only docs were changed (path filter)
+
+### **Auto Deploy Dev didn't run**
+- Verify Node CI completed successfully
+- Check that push was to `develop` branch
+- Look for `[skip ci]` in commit message
+
+### **Deployment failed in dev**
+- Check EKS cluster is running: `aws eks list-clusters`
+- Verify kubeconfig: `kubectl get nodes`
+- Check pod logs: `kubectl logs -f deployment/practice-node-app-dev -n practice-app-dev`
+- See [docs/TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
+
+---
+
+## 📚 Related Documentation
+
+- [Commit Message Conventions](../.github/COMMIT_CONVENTIONS.md)
+- [Branching Strategy](./BRANCHING_STRATEGY.md)
+- [Infrastructure Guide](./INFRASTRUCTURE.md)
+- [Kubernetes Guide](./KUBERNETES.md)
+- [Troubleshooting](./TROUBLESHOOTING.md)
+
+---
+
+This separation keeps CI fast, makes deployments intentional, and prevents unnecessary workflow runs while still maintaining a clear path from commit → dev → prod with automatic deployment to dev for fast feedback.

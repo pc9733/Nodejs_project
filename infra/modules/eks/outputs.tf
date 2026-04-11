@@ -56,3 +56,13 @@ output "kms_key_arn" {
   description = "ARN of the KMS key for EKS encryption"
   value       = aws_kms_key.eks.arn
 }
+
+output "external_secrets_role_arn" {
+  description = "ARN of the External Secrets Operator IAM role"
+  value       = var.enable_external_secrets ? aws_iam_role.external_secrets[0].arn : ""
+}
+
+output "external_secrets_namespace" {
+  description = "Namespace where External Secrets Operator is installed"
+  value       = var.enable_external_secrets ? "external-secrets" : ""
+}
