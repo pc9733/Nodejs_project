@@ -1,0 +1,299 @@
+name: Complete Project Bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to bootstrap (dev/prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'bootstrap'
+        type: choice
+        options:
+          - bootstrap     # Complete setup from scratch
+          - destroy       # Clean up everything
+          - rebuild       # Destroy + bootstrap
+          - deploy-only   # Just deploy app (infra must exist)
+      auto_approve:
+        description: "Auto-approve all operations"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: practice-node-app
+
+jobs:
+  bootstrap:
+    if: github.event.inputs.action == 'bootstrap' || github.event.inputs.action == 'rebuild'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # STEP 1: Setup Terraform Backend
+      - name: Setup Terraform Backend
+        run: |
+          echo "Setting up Terraform backend for ${{ github.event.inputs.environment }}..."
+          chmod +x scripts/setup-terraform-backend.sh
+          ./scripts/setup-terraform-backend.sh
+
+      # STEP 2: Setup Parameter Store
+      - name: Setup Parameter Store
+        run: |
+          echo "Setting up Parameter Store for ${{ github.event.inputs.environment }}..."
+          chmod +x scripts/setup-parameter-store.sh
+          echo -e "3\nyes\n" | ./scripts/setup-parameter-store.sh
+
+      # STEP 3: Setup ECR Repository
+      - name: Setup ECR Repository
+        run: |
+          echo "Setting up ECR repository..."
+          chmod +x scripts/manage-ecr.sh
+          ./scripts/manage-ecr.sh create
+
+      # STEP 4: Initialize and Apply Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Initialize Terraform
+        run: |
+          cd infra/environments/${{ github.event.inputs.environment }}
+          terraform init -reconfigure
+
+      - name: Apply Terraform
+        run: |
+          cd infra/environments/${{ github.event.inputs.environment }}
+          if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
+            terraform apply -auto-approve
+          else
+            terraform plan
+            echo "Terraform plan generated. Please review and manually apply if needed."
+          fi
+
+      # STEP 5: Build and Push Docker Image
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Docker Image
+        run: |
+          REPO_NAME="${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}"
+          echo "Building and pushing image: $REPO_NAME"
+          
+          # Build image
+          docker build -t "$REPO_NAME:latest" ./node-app/
+          
+          # Tag for ECR
+          docker tag "$REPO_NAME:latest" "${{ steps.login-ecr.outputs.registry }}/$REPO_NAME:latest"
+          
+          # Push to ECR
+          docker push "${{ steps.login-ecr.outputs.registry }}/$REPO_NAME:latest"
+
+      # STEP 6: Deploy Application to EKS
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }} --region ${{ env.AWS_REGION }}
+
+      - name: Deploy Kubernetes Resources
+        run: |
+          echo "Deploying application to ${{ github.event.inputs.environment }}..."
+          
+          # Create namespace
+          kubectl apply -f k8s/namespace.yaml
+          
+          # Update deployment image reference
+          sed -i "s|602202572057.dkr.ecr.us-east-1.amazonaws.com/practice-node-app-dev|${{ steps.login-ecr.outputs.registry }}/${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}|g" k8s/deployment.yaml
+          
+          # Deploy application
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+      # STEP 7: Verify Deployment
+      - name: Verify Deployment
+        run: |
+          echo "Verifying deployment..."
+          
+          # Wait for pods to be ready
+          kubectl wait --for=condition=Ready --timeout=300s pod -l app=practice-node-app -n practice-app || {
+            echo "Pods not ready within timeout. Checking status..."
+            kubectl get pods -n practice-app
+            kubectl describe pod -l app=practice-node-app -n practice-app
+            exit 1
+          }
+          
+          # Get service details
+          echo "Service details:"
+          kubectl get service -n practice-app
+          
+          # Get ingress details
+          echo "Ingress details:"
+          kubectl get ingress -n practice-app
+          
+          # Test application health
+          if [ "${{ github.event.inputs.environment }}" = "dev" ]; then
+            # Port forward test for dev
+            kubectl port-forward service/practice-node-app 8080:80 -n practice-app &
+            sleep 10
+            curl -f http://localhost:8080/health || {
+              echo "Health check failed"
+              kubectl logs -l app=practice-node-app -n practice-app
+              exit 1
+            }
+          fi
+
+      # STEP 8: Output Results
+      - name: Bootstrap Complete
+        run: |
+          echo "=================================================================="
+          echo "Bootstrap Complete! Environment: ${{ github.event.inputs.environment }}"
+          echo "=================================================================="
+          echo ""
+          echo "Cluster Name: ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}"
+          echo "ECR Repository: ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}"
+          echo "Namespace: practice-app"
+          echo ""
+          echo "Next Steps:"
+          echo "1. Configure kubectl: aws eks update-kubeconfig --name ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }} --region ${{ env.AWS_REGION }}"
+          echo "2. Check application: kubectl get pods -n practice-app"
+          echo "3. Access application: kubectl port-forward service/practice-node-app 8080:80 -n practice-app"
+          echo "4. View logs: kubectl logs -l app=practice-node-app -n practice-app"
+          echo "=================================================================="
+
+  destroy:
+    if: github.event.inputs.action == 'destroy' || github.event.inputs.action == 'rebuild'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Clean Up Kubernetes Resources
+        run: |
+          echo "Cleaning up Kubernetes resources..."
+          aws eks update-kubeconfig --name ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }} --region ${{ env.AWS_REGION }} || true
+          kubectl delete namespace practice-app --force --grace-period=0 || true
+
+      - name: Remove SSM Parameters from State
+        run: |
+          cd infra/environments/${{ github.event.inputs.environment }}
+          terraform init -reconfigure
+          terraform state rm aws_ssm_parameter.dev_api_key || true
+          terraform state rm aws_ssm_parameter.dev_jwt_secret || true
+
+      - name: Force Delete ECR Repository
+        run: |
+          echo "Force deleting ECR repository..."
+          REPO_NAME="${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}"
+          aws ecr delete-repository --repository-name "$REPO_NAME" --force --region ${{ env.AWS_REGION }} || true
+
+      - name: Destroy Terraform Infrastructure
+        run: |
+          cd infra/environments/${{ github.event.inputs.environment }}
+          if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
+            terraform destroy -auto-approve
+          else
+            terraform plan -destroy
+            echo "Terraform destroy plan generated. Please review and manually apply if needed."
+          fi
+
+      - name: Destroy Complete
+        run: |
+          echo "=================================================================="
+          echo "Destroy Complete! Environment: ${{ github.event.inputs.environment }}"
+          echo "=================================================================="
+
+  deploy-only:
+    if: github.event.inputs.action == 'deploy-only'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Docker Image
+        run: |
+          REPO_NAME="${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}"
+          echo "Building and pushing image: $REPO_NAME"
+          
+          # Build image
+          docker build -t "$REPO_NAME:latest" ./node-app/
+          
+          # Tag for ECR
+          docker tag "$REPO_NAME:latest" "${{ steps.login-ecr.outputs.registry }}/$REPO_NAME:latest"
+          
+          # Push to ECR
+          docker push "${{ steps.login-ecr.outputs.registry }}/$REPO_NAME:latest"
+
+      - name: Deploy to Kubernetes
+        run: |
+          echo "Deploying application to ${{ github.event.inputs.environment }}..."
+          aws eks update-kubeconfig --name ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }} --region ${{ env.AWS_REGION }}
+          
+          # Update deployment image reference
+          sed -i "s|602202572057.dkr.ecr.us-east-1.amazonaws.com/practice-node-app-dev|${{ steps.login-ecr.outputs.registry }}/${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}|g" k8s/deployment.yaml
+          
+          # Deploy application
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Verify Deployment
+        run: |
+          echo "Verifying deployment..."
+          kubectl wait --for=condition=Ready --timeout=300s pod -l app=practice-node-app -n practice-app
+          kubectl get pods -n practice-app

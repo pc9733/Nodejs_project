@@ -137,3 +137,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_external_secrets" {
+  description = "Whether to install External Secrets Operator"
+  type        = bool
+  default     = true
+}
+
+variable "external_secrets_version" {
+  description = "Version of External Secrets Operator Helm chart"
+  type        = string
+  default     = "0.9.11"
+}
+
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
+}

@@ -346,3 +346,133 @@ data "aws_eks_cluster_auth" "this" {
 }
 
 data "aws_caller_identity" "current" {}
+
+# =================================================================
+# EXTERNAL SECRETS OPERATOR IAM ROLE & POLICY
+# =================================================================
+
+# IAM Role for External Secrets Operator
+resource "aws_iam_role" "external_secrets" {
+  count = var.enable_external_secrets ? 1 : 0
+
+  name = "${var.cluster_name}-external-secrets-operator"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.eks.arn
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" = "system:serviceaccount:external-secrets:external-secrets"
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:aud" = "sts.amazonaws.com"
+        }
+      }
+    }]
+  })
+
+  tags = merge(
+    {
+      Name = "${var.cluster_name}-external-secrets-operator"
+    },
+    var.tags
+  )
+}
+
+# IAM Policy for External Secrets Operator to access Parameter Store
+resource "aws_iam_policy" "external_secrets" {
+  count = var.enable_external_secrets ? 1 : 0
+
+  name        = "${var.cluster_name}-external-secrets-policy"
+  description = "IAM policy for External Secrets Operator to access Parameter Store and Secrets Manager"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+          "ssm:DescribeParameters"
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.cluster_name}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${var.cluster_name}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey"
+        ]
+        Resource = [
+          aws_kms_key.eks.arn
+        ]
+      }
+    ]
+  })
+
+  tags = merge(
+    {
+      Name = "${var.cluster_name}-external-secrets-policy"
+    },
+    var.tags
+  )
+}
+
+# Attach policy to role
+resource "aws_iam_role_policy_attachment" "external_secrets" {
+  count = var.enable_external_secrets ? 1 : 0
+
+  policy_arn = aws_iam_policy.external_secrets[count.index].arn
+  role       = aws_iam_role.external_secrets[count.index].name
+}
+
+# External Secrets Operator Helm Release
+resource "helm_release" "external_secrets" {
+  count = var.enable_external_secrets ? 1 : 0
+
+  name             = "external-secrets"
+  repository       = "https://charts.external-secrets.io"
+  chart            = "external-secrets"
+  namespace        = "external-secrets"
+  create_namespace = true
+  version          = var.external_secrets_version
+  timeout          = 600
+  cleanup_on_fail  = true
+  max_history      = 5
+
+  set {
+    name  = "installCRDs"
+    value = "true"
+  }
+
+  set {
+    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+    value = aws_iam_role.external_secrets[count.index].arn
+  }
+
+  set {
+    name  = "webhook.port"
+    value = "9443"
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.external_secrets
+  ]
+}

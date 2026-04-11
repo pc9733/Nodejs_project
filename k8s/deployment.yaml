@@ -6,7 +6,7 @@ metadata:
   labels:
     app: practice-node-app
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: practice-node-app
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: node-app
-          image: 852994641319.dkr.ecr.us-east-1.amazonaws.com/practice-node-app:latest
+          image: 602202572057.dkr.ecr.us-east-1.amazonaws.com/practice-node-app-dev:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000

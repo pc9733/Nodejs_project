@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: node-app
-          image: 852994641319.dkr.ecr.us-east-1.amazonaws.com/practice-node-app:latest
+          image: 602202572057.dkr.ecr.us-east-1.amazonaws.com/practice-node-app:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000

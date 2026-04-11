@@ -36,7 +36,7 @@ spec:
     spec:
       containers:
       - name: node-app
-        image: 852994641319.dkr.ecr.us-east-1.amazonaws.com/practice-node-app-prod:latest
+        image: 602202572057.dkr.ecr.us-east-1.amazonaws.com/practice-node-app-prod:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
@@ -165,19 +165,49 @@ data:
   MAX_CONNECTIONS: "100"
 
 ---
-# Production Secrets
+# ServiceAccount for External Secrets Operator (required for IRSA)
 apiVersion: v1
-kind: Secret
+kind: ServiceAccount
+metadata:
+  name: external-secrets
+  namespace: practice-app-prod
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::602202572057:role/practice-node-app-prod-external-secrets-operator
+
+---
+# Production Secrets - Fetched from AWS Parameter Store via External Secrets Operator
+# IMPORTANT: Secrets are no longer hardcoded. They are pulled from AWS Systems Manager Parameter Store.
+# Prerequisites:
+#   1. External Secrets Operator must be installed (handled by Terraform)
+#   2. Parameters must exist in AWS SSM Parameter Store at:
+#      - /practice-node-app-prod/prod/db-password
+#      - /practice-node-app-prod/prod/api-key
+#      - /practice-node-app-prod/prod/jwt-secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: practice-app-secrets-prod
   namespace: practice-app-prod
   labels:
     environment: production
-type: Opaque
-data:
-  DB_PASSWORD: cHJvZC1wYXNzd29yZC1zZWN1cmUtMTIz  # base64: "prod-password-secure-123"
-  API_KEY: cHJvZC1hcGkta2V5LXNlY3VyZS1wcm9k  # base64: "prod-api-key-secure-prod"
-  JWT_SECRET: cHJvZC1qd3Qtc2VjcmV0LWtleS1wcm9kdWN0aW9u  # base64: "prod-jwt-secret-key-production"
+spec:
+  secretStoreRef:
+    name: aws-parameter-store-prod
+    kind: SecretStore
+  target:
+    name: practice-app-secrets-prod
+    creationPolicy: Owner
+  refreshInterval: 1h
+  data:
+    - secretKey: DB_PASSWORD
+      remoteRef:
+        key: /practice-node-app-prod/prod/db-password
+    - secretKey: API_KEY
+      remoteRef:
+        key: /practice-node-app-prod/prod/api-key
+    - secretKey: JWT_SECRET
+      remoteRef:
+        key: /practice-node-app-prod/prod/jwt-secret
 
 ---
 # Horizontal Pod Autoscaler

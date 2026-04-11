@@ -13,11 +13,11 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "practice-node-app-terraform-state-dev"
+    bucket         = "practice-node-app-terraform-state-602202572057-dev"
     key            = "dev/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "practice-node-app-terraform-locks-dev"
+    dynamodb_table = "practice-node-app-terraform-locks-602202572057-dev"
   }
 }
 
@@ -46,24 +46,24 @@ module "vpc" {
   )
 }
 
-# ECR Module
-module "ecr" {
-  source = "../../modules/ecr"
-
-  repository_name       = "${var.project_name}-dev"
-  image_tag_mutability  = "MUTABLE"
-  scan_on_push          = true
-  encryption_type       = "AES256"
-  enable_lifecycle_policy = true
-
-  tags = merge(
-    {
-      Environment = "development"
-      Project     = var.project_name
-    },
-    var.tags
-  )
-}
+# ECR Module - Managed externally via script
+# module "ecr" {
+#   source = "../../modules/ecr"
+# 
+#   repository_name       = "${var.project_name}-dev"
+#   image_tag_mutability  = "MUTABLE"
+#   scan_on_push          = true
+#   encryption_type       = "AES256"
+#   enable_lifecycle_policy = true
+# 
+#   tags = merge(
+#     {
+#       Environment = "development"
+#       Project     = var.project_name
+#     },
+#     var.tags
+#   )
+# }
 
 # EKS Module
 module "eks" {
