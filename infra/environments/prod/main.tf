@@ -120,6 +120,7 @@ module "eks" {
   cluster_name                 = "${var.project_name}-prod"
   kubernetes_version          = var.kubernetes_version
   subnet_ids                  = concat(module.vpc.public_subnet_ids, module.vpc.private_subnet_ids)
+  node_group_subnet_ids       = module.vpc.private_subnet_ids
   endpoint_public_access      = var.endpoint_public_access
   endpoint_private_access     = true
   public_access_cidrs         = var.public_access_cidrs

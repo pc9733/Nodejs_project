@@ -42,7 +42,7 @@ jobs:
         run: npm ci
       - name: Run tests
         working-directory: node-app
-        run: npm test || echo "No tests configured, skipping..."
+        run: npm test
       - name: Smoke test
         working-directory: node-app
         run: node -e "require('./server'); console.log('Server module loads successfully')"
