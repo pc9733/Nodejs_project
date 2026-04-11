@@ -14,52 +14,38 @@ if [ ! -d "environments/dev" ]; then
     exit 1
 fi
 
-# Create S3 bucket for Terraform state
-echo "📦 Creating S3 bucket for Terraform state..."
-BUCKET_NAME="practice-node-app-terraform-state-dev"
+# Resolve AWS account ID so bucket/table names are globally unique
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION="us-east-1"
+BUCKET_NAME="practice-node-app-terraform-state-${ACCOUNT_ID}-dev"
+DYNAMO_TABLE="practice-node-app-terraform-locks-${ACCOUNT_ID}-dev"
 
+echo "📦 Creating S3 bucket for Terraform state: $BUCKET_NAME"
 if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
-    echo "Bucket already exists"
+    echo "Bucket already exists, skipping creation"
 else
-    if [ "$AWS_REGION" = "us-east-1" ]; then
-        aws s3api create-bucket \
-            --bucket "$BUCKET_NAME" \
-            --region "$AWS_REGION"
-    else
-        aws s3api create-bucket \
-            --bucket "$BUCKET_NAME" \
-            --region "$AWS_REGION" \
-            --create-bucket-configuration LocationConstraint="$AWS_REGION"
-    fi
+    aws s3api create-bucket \
+        --bucket "$BUCKET_NAME" \
+        --region "$AWS_REGION"
 fi
 
-# Enable versioning
 aws s3api put-bucket-versioning \
     --bucket "$BUCKET_NAME" \
     --versioning-configuration Status=Enabled
 
-# Enable encryption
 aws s3api put-bucket-encryption \
     --bucket "$BUCKET_NAME" \
     --server-side-encryption-configuration '{
-        "Rules": [
-            {
-                "ApplyServerSideEncryptionByDefault": {
-                    "SSEAlgorithm": "AES256"
-                }
-            }
-        ]
+        "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
     }'
 
-# Create DynamoDB table for state locking
-echo "🔒 Creating DynamoDB table for state locking..."
+echo "🔒 Creating DynamoDB table for state locking: $DYNAMO_TABLE"
 aws dynamodb create-table \
-    --table-name practice-node-app-terraform-locks-dev \
+    --table-name "$DYNAMO_TABLE" \
     --attribute-definitions AttributeName=LockID,AttributeType=S \
     --key-schema AttributeName=LockID,KeyType=HASH \
     --billing-mode PAY_PER_REQUEST \
-    --region us-east-1 || echo "Table already exists"
+    --region "$AWS_REGION" 2>/dev/null && echo "Table created" || echo "Table already exists, skipping"
 
 # Initialize Terraform
 echo "🔧 Initializing Terraform..."
