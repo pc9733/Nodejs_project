@@ -62,6 +62,24 @@ if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
     else
         echo "No leftover load balancers found."
     fi
+
+    # Step 3 — delete security groups created by the ALB controller (not in Terraform state)
+    # These block VPC deletion if left behind.
+    echo "🔍 Checking for leftover security groups in the VPC..."
+    SG_IDS=$(aws ec2 describe-security-groups --region "$AWS_REGION" \
+        --filters "Name=vpc-id,Values=${VPC_ID}" \
+        --query 'SecurityGroups[?GroupName!=`default`].GroupId' \
+        --output text 2>/dev/null || echo "")
+
+    if [ -n "$SG_IDS" ]; then
+        echo "Found security groups — deleting..."
+        for SG_ID in $SG_IDS; do
+            aws ec2 delete-security-group --group-id "$SG_ID" --region "$AWS_REGION" 2>/dev/null && \
+                echo "  Deleted: $SG_ID" || echo "  Skipped (may be in use): $SG_ID"
+        done
+    else
+        echo "No leftover security groups found."
+    fi
 else
     echo "VPC not found — already destroyed or never created."
 fi
