@@ -43,7 +43,8 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/') {
     return sendJson(res, 200, {
       message: 'Simple Node.js API running',
-      routes: ['GET /health', 'GET /tasks', 'GET /tasks/:id', 'POST /tasks'],
+
+      routes: ['GET /health', 'GET /tasks', 'GET /tasks/:id', 'POST /tasks', 'DELETE /tasks/:id'],
     });
   }
 
@@ -60,6 +61,14 @@ const server = http.createServer(async (req, res) => {
     const task = tasks.find((t) => t.id === id);
     if (!task) return sendJson(res, 404, { error: 'Task not found' });
     return sendJson(res, 200, task);
+  }
+
+  if (req.method === 'DELETE' && url.pathname.startsWith('/tasks/')) {
+    const id = Number(url.pathname.split('/')[2]);
+    const index = tasks.findIndex((t) => t.id === id);
+    if (index === -1) return sendJson(res, 404, { error: 'Task not found' });
+    tasks.splice(index, 1);
+    return sendJson(res, 200, { message: 'Task deleted successfully' });
   }
 
   if (req.method === 'POST' && url.pathname === '/tasks') {
@@ -90,3 +99,4 @@ if (require.main === module) {
 }
 
 module.exports = server;
+
