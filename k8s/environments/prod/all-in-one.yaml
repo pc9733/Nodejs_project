@@ -167,24 +167,7 @@ data:
   MAX_CONNECTIONS: "100"
 
 ---
-# ServiceAccount for External Secrets Operator (required for IRSA)
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: external-secrets
-  namespace: practice-app-prod
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::602202572057:role/practice-node-app-prod-external-secrets-operator
-
----
-# Production Secrets - Fetched from AWS Parameter Store via External Secrets Operator
-# IMPORTANT: Secrets are no longer hardcoded. They are pulled from AWS Systems Manager Parameter Store.
-# Prerequisites:
-#   1. External Secrets Operator must be installed (handled by Terraform)
-#   2. Parameters must exist in AWS SSM Parameter Store at:
-#      - /practice-node-app-prod/prod/db-password
-#      - /practice-node-app-prod/prod/api-key
-#      - /practice-node-app-prod/prod/jwt-secret
+# Production Secrets — synced from SSM via ClusterSecretStore (see k8s/addons/external-secrets-prod.yaml)
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -194,8 +177,8 @@ metadata:
     environment: production
 spec:
   secretStoreRef:
-    name: aws-parameter-store-prod
-    kind: SecretStore
+    name: aws-parameter-store
+    kind: ClusterSecretStore
   target:
     name: practice-app-secrets-prod
     creationPolicy: Owner

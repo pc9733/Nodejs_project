@@ -39,7 +39,7 @@ cd infra && ./create-dev.sh
 ./scripts/setup-parameter-store.sh
 
 # 3. SecretStore + app (or push to develop for CI)
-kubectl apply -f k8s/addons/external-secrets-config.yaml
+kubectl apply -f k8s/addons/external-secrets-dev.yaml
 kubectl apply -f k8s/environments/dev/all-in-one.yaml
 ```
 
