@@ -24,7 +24,7 @@ metadata:
     app: practice-node-app-dev
     environment: development
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: practice-node-app-dev
@@ -153,8 +153,8 @@ metadata:
     environment: development
 spec:
   secretStoreRef:
-    name: aws-parameter-store-dev
-    kind: SecretStore
+    name: aws-parameter-store
+    kind: ClusterSecretStore
   target:
     name: practice-app-secrets-dev
     creationPolicy: Owner
@@ -169,93 +169,5 @@ spec:
     - secretKey: JWT_SECRET
       remoteRef:
         key: /practice-node-app-dev/dev/jwt-secret
-
----
-# ServiceAccount for External Secrets Operator (required for IRSA)
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: external-secrets
-  namespace: practice-app-dev
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::602202572057:role/practice-node-app-dev-external-secrets-operator
-
----
-
-# Datadog Namespace
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: datadog
-  labels:
-    app: datadog-agent
-    environment: development
-
----
-# ServiceAccount for External Secrets in Datadog namespace
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: external-secrets
-  namespace: datadog
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::602202572057:role/practice-node-app-dev-external-secrets-operator
-
----
-# Datadog Secrets - Fetched from AWS Parameter Store
-# Parameters must exist at:
-#   - /practice-node-app-dev/dev/datadog-api-key
-#   - /practice-node-app-dev/dev/datadog-app-key
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: datadog-secret
-  namespace: datadog
-spec:
-  secretStoreRef:
-    name: aws-parameter-store-datadog
-    kind: SecretStore
-  target:
-    name: datadog-secret
-    creationPolicy: Owner
-  refreshInterval: 1h
-  data:
-    - secretKey: api-key
-      remoteRef:
-        key: /practice-node-app-dev/dev/datadog-api-key
-    - secretKey: app-key
-      remoteRef:
-        key: /practice-node-app-dev/dev/datadog-app-key
-
----
-apiVersion: datadoghq.com/v2alpha1
-kind: DatadogAgent
-metadata:
-  name: datadog
-  namespace: datadog
-spec:
-  global:
-    clusterName: practice-node-app-dev
-    site: datadoghq.com
-    credentials:
-      apiSecret:
-        secretName: datadog-secret
-        keyName: api-key
-      appSecret:
-        secretName: datadog-secret
-        keyName: app-key
-    tags:
-      - env:dev
-      - service:practice-node-app
-  features:
-    clusterChecks:
-      enabled: true
-    orchestratorExplorer:
-      enabled: true
-    kubeStateMetricsCore:
-      enabled: true
-    logCollection:
-      enabled: true
-  
 
 ---
