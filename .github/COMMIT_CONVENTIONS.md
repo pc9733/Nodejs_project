@@ -335,9 +335,8 @@ git config --global commit.template ~/.gitmessage
 
 ## 🔗 Related Documentation
 
-- [GitHub Actions Workflows](../docs/CICD.md)
-- [Branching Strategy](../docs/BRANCHING_STRATEGY.md)
-- [Contributing Guide](../CONTRIBUTING.md)
+- [GitHub Actions Workflows](../docs/WORKFLOWS.md)
+- [Project README](../README.md)
 
 ---
 

@@ -1,4 +1,75 @@
-# Troubleshooting Guide
+"# Datadog Issues
+
+## Agent/cluster-agent logs show `API Key invalid (403)`
+
+```bash
+kubectl logs datadog-agent-xxxxx -n datadog | grep -i "API Key invalid"
+```
+
+## CI/CD Issues
+
+## Docker Build Failed
+
+```bash
+# Check Dockerfile syntax
+docker build -t test ./node-app
+
+# Verify context path
+# Ensure all required files are in node-app/
+
+# Check for large files (>2GB)
+du -sh node-app/*
+```
+
+## ECR Push Failed
+
+```bash
+# Check AWS credentials
+aws sts get-caller-identity
+
+# Verify ECR permissions
+aws ecr get-authorization-token
+
+# Update GitHub secrets with fresh credentials
+```
+
+## kubectl Commands Failed
+
+```bash
+# Check kubeconfig
+kubectl config view
+
+# Verify cluster access
+aws eks update-kubeconfig --name practice-node-app
+
+# Test cluster connectivity
+kubectl get nodes
+```
+
+## Trivy Scan Failed
+
+```bash
+# Check if image exists in ECR
+aws ecr describe-images --repository-name practice-node-app
+
+# Use correct image tag
+# Ensure using 'latest' tag, not commit SHA
+
+# Run Trivy locally for debugging
+trivy image <ecr-image-uri>
+```
+
+## Performance Test Failed
+
+```bash
+# Check k6 installation
+k6 version
+
+# Manual installation test
+curl -L -o k6.tar.gz "https://github.com/grafana/k6/releases/download/v0.55.0/k6-v0.55.0-linux-amd64.tar.gz"
+tar -xzf k6.tar.gz
+sudo mv k6-v0.55.0-linux-amd64/k6 /usr/local/bin/
+```# Troubleshooting Guide
 
 ## Common Issues and Solutions
 

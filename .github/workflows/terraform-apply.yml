@@ -115,7 +115,7 @@ jobs:
           echo "**ECR Repository:** ${{ steps.apply.outputs.ecr_repository }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🚀 Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. Deploy application using the appropriate workflow:" >> $GITHUB_STEP_SUMMARY
-          echo "   - Development: \`deploy-dev.yml\`" >> $GITHUB_STEP_SUMMARY
-          echo "   - Production: \`deploy-prod.yml\`" >> $GITHUB_STEP_SUMMARY
+          echo "1. Deploy application:" >> $GITHUB_STEP_SUMMARY
+          echo "   - Development: push to \`develop\` (auto-deploy-dev)" >> $GITHUB_STEP_SUMMARY
+          echo "   - Production: run \`deploy-prod.yml\` manually" >> $GITHUB_STEP_SUMMARY
           echo "2. Configure kubectl: \`aws eks update-kubeconfig --name ${{ steps.apply.outputs.cluster_name }} --region ${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY

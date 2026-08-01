@@ -41,4 +41,6 @@ aws eks update-kubeconfig --name practice-node-app-dev --region us-east-1
 echo "✅ Development environment created successfully!"
 echo ""
 echo "🔧 Next steps:"
-echo "1. Deploy application: ./deploy-dev.yml workflow"
+echo "1. Set secrets: ../scripts/setup-parameter-store.sh"
+echo "2. Apply SecretStore: kubectl apply -f ../k8s/addons/external-secrets-config.yaml"
+echo "3. Deploy app: push to develop (auto-deploy) or kubectl apply -f ../k8s/environments/dev/all-in-one.yaml"
