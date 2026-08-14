@@ -10,6 +10,14 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0"
+    }
   }
 
   backend "s3" {
@@ -125,7 +133,7 @@ module "eks" {
   endpoint_private_access     = true
   public_access_cidrs         = var.public_access_cidrs
   service_ipv4_cidr           = "172.21.0.0/16"
-  encryption_resources        = ["secrets", "configmaps"]
+  encryption_resources        = ["secrets"]
   enabled_cluster_log_types   = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
   
   # Larger node group for prod
@@ -140,6 +148,7 @@ module "eks" {
   
   enable_alb_controller       = true
   alb_controller_version      = "3.0.0"
+  aws_region                  = var.aws_region
 
   tags = merge(
     {

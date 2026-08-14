@@ -237,19 +237,42 @@ resource "aws_iam_openid_connect_provider" "eks" {
   url             = aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
 
-# Kubernetes Provider Configuration
+# Kubernetes / Helm auth via aws CLI (static tokens often become empty → system:anonymous)
 provider "kubernetes" {
   host                   = aws_eks_cluster.this.endpoint
   cluster_ca_certificate = base64decode(aws_eks_cluster.this.certificate_authority[0].data)
-  token                  = data.aws_eks_cluster_auth.this.token
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args = [
+      "eks",
+      "get-token",
+      "--cluster-name",
+      aws_eks_cluster.this.name,
+      "--region",
+      var.aws_region,
+    ]
+  }
 }
 
-# Helm Provider Configuration
 provider "helm" {
   kubernetes {
     host                   = aws_eks_cluster.this.endpoint
     cluster_ca_certificate = base64decode(aws_eks_cluster.this.certificate_authority[0].data)
-    token                  = data.aws_eks_cluster_auth.this.token
+
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args = [
+        "eks",
+        "get-token",
+        "--cluster-name",
+        aws_eks_cluster.this.name,
+        "--region",
+        var.aws_region,
+      ]
+    }
   }
 }
 
@@ -338,11 +361,6 @@ resource "aws_iam_role_policy_attachment" "alb_controller_policy" {
 
   policy_arn = aws_iam_policy.alb_controller[count.index].arn
   role       = aws_iam_role.alb_controller[count.index].name
-}
-
-# Data sources for authentication
-data "aws_eks_cluster_auth" "this" {
-  name = aws_eks_cluster.this.name
 }
 
 data "aws_caller_identity" "current" {}
@@ -473,6 +491,7 @@ resource "helm_release" "external_secrets" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.external_secrets
+    aws_iam_role_policy_attachment.external_secrets,
+    helm_release.aws_load_balancer_controller,
   ]
 }

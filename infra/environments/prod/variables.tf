@@ -53,13 +53,13 @@ variable "kubernetes_version" {
 variable "endpoint_public_access" {
   description = "Whether EKS cluster has public endpoint access"
   type        = bool
-  default     = false  # More secure for prod
+  default     = true  # Required for Terraform/kubectl from your laptop (practice)
 }
 
 variable "public_access_cidrs" {
   description = "CIDR blocks that can access the public endpoint"
   type        = list(string)
-  default     = []  # No public access for prod
+  default     = ["0.0.0.0/0"]
 }
 
 variable "tags" {
