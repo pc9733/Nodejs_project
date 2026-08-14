@@ -22,6 +22,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: write
       security-events: write
       pull-requests: write
 
@@ -66,6 +67,13 @@ jobs:
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          install: true
+          driver-opts: image=moby/buildkit:rootless
 
       - name: Determine image tag
         id: image_tag
