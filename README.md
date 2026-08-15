@@ -1,243 +1,313 @@
 # Node.js EKS Practice Project
 
-**Node app → GitHub Actions → ECR → EKS**
+**Goal:** open this repo → run the steps below → cluster + app running.  
+After destroy, run the **same playbook again** — no guessing.
 
-Only two environments: **dev** and **prod**.  
-Ignore everything under `archive/` — those are old leftovers.
+Two environments: **dev** and **prod**. Pick one playbook.
 
 ---
 
-## Start here: what do you want?
+## Before you start (once per machine)
 
-Answer the questions top → bottom. Use **only** the command in that box.
-
-### 1) Do you have a cluster yet?
-
-```
-No cluster / starting from zero?
-  └─ YES →  cd infra && ./create-dev.sh
-            (prod: ./create-prod.sh)
-
-Done practicing / stop AWS bills?
-  └─ YES →  cd infra && ./destroy-dev-simple.sh
-            (prod: ./destroy-prod-simple.sh)
-
-Already have a cluster?
-  └─ YES →  go to question 2
-```
-
-| Use this | Don’t use this |
+| Tool | Check |
 |---|---|
-| `infra/create-*.sh` / `destroy-*.sh` | Root `infra/*.tf` (archived), random Terraform in other folders |
+| AWS CLI (`us-east-1`) | `aws sts get-caller-identity` |
+| Terraform ≥ 1.0 | `terraform version` |
+| kubectl | `kubectl version --client` |
+| Docker (first manual deploy) | `docker version` |
+| GitHub secrets (CI/CD only) | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` in repo settings |
 
----
-
-### 2) Are secrets in AWS and wired to Kubernetes?
-
-```
-Need to CREATE secret values in AWS (SSM)?
-  └─ YES →  ./scripts/setup-parameter-store.sh
-             (run once per env; interactive)
-
-Need to CONNECT the cluster to those secrets?
-  └─ YES →  # on DEV cluster:
-             kubectl apply -f k8s/addons/external-secrets-dev.yaml
-
-             # on PROD cluster:
-             kubectl apply -f k8s/addons/external-secrets-prod.yaml
-
-Secrets already working (ExternalSecret = SecretSynced)?
-  └─ YES →  go to question 3
-```
-
-| Use this | Don’t use this |
-|---|---|
-| `external-secrets-dev.yaml` or `…-prod.yaml` | `external-secrets-config.yaml` (pointer only — do not apply) |
-| Matching file for the cluster you’re on | Dev file on prod cluster (or vice versa) |
-
----
-
-### 3) Do you want to run / update the app?
-
-```
-First deploy on this cluster (or fix manifests by hand)?
-  └─ YES →  # DEV:
-             kubectl apply -f k8s/environments/dev/all-in-one.yaml
-
-             # PROD:
-             kubectl apply -f k8s/environments/prod/all-in-one.yaml
-
-Normal coding — ship a new build to DEV?
-  └─ YES →  1. Commit on feature/*
-            2. Open PR → merge to develop
-            3. Wait: Node CI → Auto Deploy to Development
-            (no kubectl needed)
-
-Ship a new build to PROD?
-  └─ YES →  1. PR develop → merge to main
-            2. GitHub → Actions → "Deploy to Production"
-            3. Type the confirmation phrase
-            (do NOT rely on auto-deploy for prod)
-```
-
-| Situation | Tool |
-|---|---|
-| First-time / manual fix | `kubectl apply` + `all-in-one.yaml` |
-| Everyday code change → **dev** | Git merge to `develop` |
-| Release → **prod** | Manual workflow `deploy-prod.yml` |
-| Only change AWS (VPC/EKS/size) | Edit `infra/` → PR → **Terraform Apply** workflow |
-
----
-
-### 4) Changing infrastructure (not app code)?
-
-```
-Edited files under infra/?
-  └─ YES →  1. PR to main (terraform-plan comments on the PR)
-            2. Actions → "Terraform Apply" → pick dev or prod
-
-Just create/destroy whole env?
-  └─ YES →  use create-*.sh / destroy-*.sh (question 1)
-            not required to use GitHub Actions for that
-```
-
----
-
-## One cheat sheet (print this)
-
-| Goal | Command / action | When |
-|---|---|---|
-| Create **dev** AWS | `cd infra && ./create-dev.sh` | Once / rebuild |
-| Create **prod** AWS | `cd infra && ./create-prod.sh` | Once / rebuild |
-| Destroy **dev** | `cd infra && ./destroy-dev-simple.sh` | Done practicing |
-| Destroy **prod** | `cd infra && ./destroy-prod-simple.sh` | Done practicing |
-| Put secrets in SSM | `./scripts/setup-parameter-store.sh` | Once per env |
-| Link SSM → cluster (dev) | `kubectl apply -f k8s/addons/external-secrets-dev.yaml` | After cluster exists |
-| Link SSM → cluster (prod) | `kubectl apply -f k8s/addons/external-secrets-prod.yaml` | After cluster exists |
-| Install / refresh app (dev) | `kubectl apply -f k8s/environments/dev/all-in-one.yaml` | First deploy or manifest edit |
-| Install / refresh app (prod) | `kubectl apply -f k8s/environments/prod/all-in-one.yaml` | First deploy or manifest edit |
-| New code → **dev** | Merge to `develop` | Every feature |
-| New code → **prod** | Actions → Deploy to Production | Releases |
-| Terraform change | Actions → Terraform Apply | Infra edits |
-| Look at pods | `kubectl get pods -n practice-app-dev` | Debugging |
-| Hit the API locally | `kubectl port-forward svc/practice-node-app-dev 3000:80 -n practice-app-dev` | Debugging |
-
----
-
-## Layers (so you don’t mix tools)
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  AWS cloud (VPC, EKS, ECR, IAM)                         │
-│  → Terraform scripts in infra/                          │
-├─────────────────────────────────────────────────────────┤
-│  Cluster addons (ALB controller, External Secrets)      │
-│  → Installed by Terraform automatically                 │
-│  → You only apply ClusterSecretStore YAML (addons/)     │
-├─────────────────────────────────────────────────────────┤
-│  Your Node app (Deployment, Service, Ingress, secrets)  │
-│  → k8s/environments/*/all-in-one.yaml                   │
-│  → OR GitHub Actions after you merge                    │
-├─────────────────────────────────────────────────────────┤
-│  App source code                                        │
-│  → node-app/  (edit here, push via Git)                 │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Rule:**  
-- Cloud problem → `infra/` scripts or Terraform workflows  
-- Secrets problem → `scripts/setup-parameter-store.sh` + `k8s/addons/external-secrets-*.yaml`  
-- App/runtime problem → `all-in-one.yaml` or CI deploy  
-- Code change → Git branches, not Terraform  
-
----
-
-## First-time path (dev) — copy/paste order
+Set region once:
 
 ```bash
-cd infra && ./create-dev.sh
+export AWS_REGION=us-east-1
+```
 
+---
+
+## Rebuild **prod** from zero
+
+Use this after `./destroy-prod-simple.sh` or the first time.  
+**Time:** ~20–30 min (cluster create is the slow part).
+
+### Step 1 — Create cluster
+
+```bash
+cd infra
+./create-prod.sh          # type: create-production
+```
+
+**✅ Pass when:**
+
+```bash
+aws eks update-kubeconfig --name practice-node-app-prod --region us-east-1
+kubectl get nodes                    # all Ready
+kubectl get pods -n external-secrets # all Running
+kubectl get svc -n external-secrets  # external-secrets-webhook exists
+```
+
+**❌ If external-secrets pods are not Running** → see [docs/PARAMETER_STORE.md](docs/PARAMETER_STORE.md) (ESO webhook section).
+
+---
+
+### Step 2 — Create secrets in AWS (SSM)
+
+From **repo root**:
+
+```bash
+./scripts/setup-parameter-store.sh   # choose: 2) Production
+```
+
+**✅ Pass when:**
+
+```bash
+aws ssm get-parameter --name /practice-node-app-prod/prod/db-password --with-decryption --query Parameter.Name
+aws ssm get-parameter --name /practice-node-app-prod/prod/api-key --with-decryption --query Parameter.Name
+aws ssm get-parameter --name /practice-node-app-prod/prod/jwt-secret --with-decryption --query Parameter.Name
+```
+
+---
+
+### Step 3 — Connect cluster to SSM
+
+```bash
+kubectl apply -f k8s/addons/external-secrets-prod.yaml
+```
+
+**✅ Pass when:**
+
+```bash
+kubectl get clustersecretstore    # STATUS: Ready=True
+```
+
+---
+
+### Step 4 — Deploy the app
+
+Prod ECR is **immutable** — do **not** rely on `:latest` alone. Use one of these:
+
+#### Option A — GitHub Actions (recommended)
+
+1. Merge your code to `main`
+2. GitHub → **Actions** → **Deploy to Production**
+3. Type `deploy-production`
+
+This builds the image, pushes `main-<sha>` to ECR, and updates the deployment.
+
+#### Option B — Manual (local Docker)
+
+```bash
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/practice-node-app-prod"
+TAG="manual-$(date +%Y%m%d-%H%M)"
+
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+cd node-app
+docker build -t practice-node-app-prod:$TAG .
+docker tag practice-node-app-prod:$TAG $ECR:$TAG
+docker push $ECR:$TAG
+
+cd ..
+kubectl apply -f k8s/environments/prod/all-in-one.yaml
+kubectl set image deployment/practice-node-app-prod \
+  node-app=$ECR:$TAG -n practice-app-prod
+```
+
+---
+
+### Step 5 — Verify app is healthy
+
+```bash
+kubectl get externalsecret -n practice-app-prod   # SecretSynced
+kubectl get pods -n practice-app-prod             # 3/3 Running (no ImagePullBackOff)
+kubectl rollout status deployment/practice-node-app-prod -n practice-app-prod
+
+ALB=$(kubectl get ingress practice-node-app-prod -n practice-app-prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+echo "http://$ALB/health"
+curl -sf "http://$ALB/health"    # {"status":"ok"} or similar 200
+```
+
+**✅ Done** when `/health` returns 200 and all pods are Running.
+
+| Common failure | Fix |
+|---|---|
+| `ImagePullBackOff` | No image in ECR — redo Step 4 (use a new tag for prod) |
+| `SecretSynced: false` | Redo Steps 2–3; check [docs/PARAMETER_STORE.md](docs/PARAMETER_STORE.md) |
+| `/health` times out | Wait 2–3 min for ALB; check `kubectl get ingress` has an ADDRESS |
+| Wrong cluster | `kubectl config current-context` must be `practice-node-app-prod` |
+
+---
+
+## Rebuild **dev** from zero
+
+Same idea as prod. Differences noted below.
+
+### Step 1 — Create cluster
+
+```bash
+cd infra
+./create-dev.sh
+```
+
+**✅ Pass when:**
+
+```bash
+aws eks update-kubeconfig --name practice-node-app-dev --region us-east-1
 kubectl get nodes
-kubectl get deploy,svc -n external-secrets          # webhook Service must exist
+kubectl get pods -n external-secrets    # all Running
+```
 
-cd .. && ./scripts/setup-parameter-store.sh
+> **Note:** Dev ECR is not created by Terraform. If the repo does not exist yet:
+> `aws ecr create-repository --repository-name practice-node-app-dev --region us-east-1`
 
+---
+
+### Step 2 — Secrets
+
+Dev parameters are partly created by Terraform (`infra/environments/dev/parameter-store.tf`).  
+To set real values (recommended):
+
+```bash
+./scripts/setup-parameter-store.sh   # choose: 1) Development
+```
+
+---
+
+### Step 3 — Connect cluster to SSM
+
+```bash
 kubectl apply -f k8s/addons/external-secrets-dev.yaml
-kubectl apply -f k8s/environments/dev/all-in-one.yaml
+kubectl get clustersecretstore    # Ready=True
+```
 
-kubectl get clustersecretstore                      # Ready=True
-kubectl get externalsecret -n practice-app-dev      # SecretSynced
-kubectl get pods -n practice-app-dev                # Running
+---
+
+### Step 4 — Deploy the app
+
+#### Option A — GitHub Actions (routine)
+
+Merge to `develop` → **Node CI** runs → **Auto Deploy to Development** builds and deploys.
+
+#### Option B — Manual (first deploy)
+
+```bash
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/practice-node-app-dev"
+
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+cd node-app && docker build -t practice-node-app-dev:latest .
+docker tag practice-node-app-dev:latest $ECR:latest
+docker push $ECR:latest
+cd ..
+
+kubectl apply -f k8s/environments/dev/all-in-one.yaml
+```
+
+---
+
+### Step 5 — Verify
+
+```bash
+kubectl get externalsecret -n practice-app-dev   # SecretSynced
+kubectl get pods -n practice-app-dev             # Running
 
 kubectl port-forward svc/practice-node-app-dev 3000:80 -n practice-app-dev
 # http://localhost:3000/health
 ```
 
-After that, **stop using kubectl for routine deploys** — merge to `develop` instead.
+---
+
+## Health checklist (run after every rebuild)
+
+Copy/paste — replace `<env>` with `dev` or `prod`:
+
+```bash
+kubectl get nodes
+kubectl get pods -n external-secrets
+kubectl get clustersecretstore
+kubectl get externalsecret -n practice-app-<env>
+kubectl get pods -n practice-app-<env>
+kubectl get ingress -n practice-app-<env>
+```
+
+All green → app layer is fine. If something fails, use the table in the prod Step 5 section above.
 
 ---
 
-## Branches (code only)
+## Destroy (stop AWS bills)
 
-```
-feature/* ──PR──▶ develop ──PR──▶ main
-                    │               │
-              auto → DEV EKS    you run → PROD EKS
+```bash
+cd infra
+./destroy-dev-simple.sh      # dev
+./destroy-prod-simple.sh     # prod — type: destroy-production
 ```
 
-| Branch | Use when |
+After destroy, clusters and apps are gone. **To work again, run the full rebuild playbook** for that env from Step 1.
+
+---
+
+## Routine updates (after first successful deploy)
+
+You do **not** repeat the full playbook for every code change.
+
+| Env | How to ship code |
 |---|---|
-| `feature/*` | Writing code / tests |
-| `develop` | “Put this on the dev cluster” |
-| `main` | “This is ready for prod” (still must click Deploy) |
+| **dev** | Merge to `develop` → auto-deploy |
+| **prod** | Merge to `main` → Actions → **Deploy to Production** → type `deploy-production` |
+
+### CI/CD workflows (3)
+
+| Workflow | When | What you do |
+|---|---|---|
+| `node-ci.yml` | Push/PR when `node-app/` changes | Nothing — runs tests |
+| `auto-deploy-dev.yml` | After CI passes on push to `develop` | Merge to `develop` |
+| `deploy-prod.yml` | Manual only | Actions → Deploy to Production |
+
+Image tags: `develop-<sha>` (dev), `main-<sha>` (prod).
+
+**CI/CD needs:** cluster exists + GitHub AWS secrets set.  
+**CI/CD does not:** create/destroy clusters — use `infra/*.sh` for that.
 
 ---
 
-## Names you will see
+## Quick reference
 
 | | Dev | Prod |
 |---|---|---|
+| Create | `cd infra && ./create-dev.sh` | `cd infra && ./create-prod.sh` |
+| Destroy | `./destroy-dev-simple.sh` | `./destroy-prod-simple.sh` |
 | Cluster | `practice-node-app-dev` | `practice-node-app-prod` |
 | Namespace | `practice-app-dev` | `practice-app-prod` |
-| Manifest | `k8s/environments/dev/all-in-one.yaml` | `k8s/environments/prod/all-in-one.yaml` |
-| SecretStore file | `k8s/addons/external-secrets-dev.yaml` | `k8s/addons/external-secrets-prod.yaml` |
+| App manifest | `k8s/environments/dev/all-in-one.yaml` | `k8s/environments/prod/all-in-one.yaml` |
+| SecretStore | `k8s/addons/external-secrets-dev.yaml` | `k8s/addons/external-secrets-prod.yaml` |
+| Practice nginx (optional) | — | `k8s/environments/prod/deployment-2.yml` |
 
-Always check: `kubectl config current-context` matches the env you’re applying.
-
----
-
-## Prerequisites
-
-AWS CLI (`us-east-1`), Terraform ≥ 1.0, kubectl, Docker (optional locally).  
-GitHub repo secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
-
----
-
-## Common “wrong tool” mistakes
-
-| You did… | Wrong because… | Do this instead |
-|---|---|---|
-| Applied `external-secrets-config.yaml` | It’s not a real manifest | Use `-dev.yaml` or `-prod.yaml` |
-| Applied prod YAML on the dev cluster | Wrong cluster / namespaces | Match file to context |
-| Used Terraform to change app image | Infra ≠ app deploys | Merge to `develop` or `kubectl set image` / CI |
-| Used kubectl every push | CI already deploys develop | Merge to `develop` |
-| Expected prod auto-deploy on `main` | Prod is manual on purpose | Run **Deploy to Production** |
-
----
-
-## More detail (only if needed)
-
-| Doc | Open when… |
-|---|---|
-| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | Which of the 6 GitHub Actions to click |
-| [docs/PARAMETER_STORE.md](docs/PARAMETER_STORE.md) | Secrets broken / ESO webhook missing |
-| [infra/README.md](infra/README.md) | Terraform module / script details |
-| `docs/archive/` | Curiosity only — may be outdated |
-
----
-
-## Stop costs
+### Infra tweak (existing cluster, not full rebuild)
 
 ```bash
-cd infra && ./destroy-dev-simple.sh
+cd infra/environments/dev    # or prod
+terraform plan && terraform apply
 ```
+
+### Common mistakes
+
+| Mistake | Do instead |
+|---|---|
+| Applied prod YAML on dev cluster | Match manifest to `kubectl config current-context` |
+| Skipped SSM / SecretStore steps | Always Steps 2–3 before expecting pods to start |
+| Prod deploy with only `:latest` | Use **Deploy to Production** or push a unique tag |
+| Ran CI/CD with no cluster | Run create script first |
+| Changed app image via Terraform | Merge to `develop` or use deploy workflow |
+
+---
+
+## More detail
+
+| Doc | When |
+|---|---|
+| [docs/PARAMETER_STORE.md](docs/PARAMETER_STORE.md) | Secrets / ExternalSecret not syncing |
+| [docs/WORKFLOWS.md](docs/WORKFLOWS.md) | CI/CD quick reference |
+| [docs/INGRESS_PRACTICE_PLAN.md](docs/INGRESS_PRACTICE_PLAN.md) | Ingress + multi-page app practice |
+| [infra/README.md](infra/README.md) | Terraform layout |

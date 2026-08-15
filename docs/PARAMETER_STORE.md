@@ -6,17 +6,17 @@ Secrets live in **AWS SSM Parameter Store** and sync into Kubernetes via **Exter
 SSM Parameter Store → ClusterSecretStore → ExternalSecret → K8s Secret → Pods
 ```
 
-## Setup (once per env)
+## Setup (once per env, after cluster exists)
 
 ```bash
-# 1. Create parameters
-./scripts/setup-parameter-store.sh
+# 1. Cluster must exist first (ESO installed by Terraform)
+cd infra && ./create-dev.sh    # or ./create-prod.sh
 
-# 2. Infra must already exist (ESO installed by Terraform)
-cd infra && ./create-dev.sh
-
-# 3. Confirm ESO is healthy (webhook Service must exist)
+# 2. Confirm ESO is healthy (webhook Service must exist)
 kubectl get deploy,svc -n external-secrets
+
+# 3. Create or update SSM parameters (from repo root)
+./scripts/setup-parameter-store.sh
 
 # 4. Apply ClusterSecretStore for THIS cluster
 kubectl apply -f k8s/addons/external-secrets-dev.yaml    # on dev
@@ -55,5 +55,3 @@ kubectl annotate sa external-secrets -n external-secrets \
   eks.amazonaws.com/role-arn=arn:aws:iam::ACCOUNT:role/practice-node-app-dev-external-secrets-operator \
   --overwrite
 ```
-
-Longer notes: [docs/archive/PARAMETER_STORE_SETUP.md](archive/PARAMETER_STORE_SETUP.md)

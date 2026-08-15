@@ -38,6 +38,7 @@
         "elasticloadbalancing:DeleteTargetGroup",
         "elasticloadbalancing:DeregisterTargets",
         "elasticloadbalancing:DescribeListenerCertificates",
+        "elasticloadbalancing:DescribeListenerAttributes",
         "elasticloadbalancing:DescribeListeners",
         "elasticloadbalancing:DescribeLoadBalancers",
         "elasticloadbalancing:DescribeLoadBalancerAttributes",
@@ -73,7 +74,9 @@
         "shield:DeleteProtection",
         "shield:CreateProtection",
         "shield:DescribeSubscription",
-        "shield:ListProtections"
+        "shield:ListProtections",
+        "acm:ListCertificates",
+        "acm:DescribeCertificate"
       ],
       "Resource": "*"
     }
