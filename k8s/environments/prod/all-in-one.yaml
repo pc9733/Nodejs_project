@@ -122,9 +122,9 @@ metadata:
     kubernetes.io/ingress.class: "alb"
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80,"HTTPS":443}]'
-    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS-1-2-2017-01"
-    # TODO: set this to your ACM certificate ARN to enable HTTPS termination
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    # For HTTPS, add certificate-arn and use: '[{"HTTP":80,"HTTPS":443}]'
+    # alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS-1-2-2017-01"
     # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:602202572057:certificate/<cert-id>
     alb.ingress.kubernetes.io/healthcheck-path: "/health"
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"

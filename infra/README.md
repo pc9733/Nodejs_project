@@ -2,7 +2,7 @@
 
 Terraform for VPC, EKS, ECR, and cluster addons (ALB controller + External Secrets via Helm).
 
-**Always work from `environments/dev` or `environments/prod`** (via the scripts below). Ignore `infra/archive/` — old root module.
+**Always work from `environments/dev` or `environments/prod`** (via the scripts below).
 
 ## Create / destroy
 
@@ -16,6 +16,16 @@ cd infra
 ./destroy-prod-simple.sh     # destroy production (typed confirm)
 ```
 
+`create-*.sh` runs `setup-*.sh` first (S3 state bucket + DynamoDB lock table), then `terraform apply`.
+
+## Update existing infra (not full recreate)
+
+```bash
+cd infra/environments/dev    # or prod
+terraform plan
+terraform apply
+```
+
 ## Layout
 
 ```
@@ -24,7 +34,6 @@ infra/
 ├── environments/prod/    # live Terraform for prod
 ├── modules/              # vpc, eks, ecr, parameter-store
 ├── create-*.sh / destroy-*.sh / setup-*.sh
-└── archive/              # legacy root module (unused)
 ```
 
 ## Env details
@@ -41,13 +50,12 @@ infra/
 ```bash
 aws eks update-kubeconfig --name practice-node-app-dev --region us-east-1
 kubectl get nodes
+
+# from repo root:
+./scripts/setup-parameter-store.sh
+kubectl apply -f k8s/addons/external-secrets-dev.yaml
+kubectl apply -f k8s/environments/dev/all-in-one.yaml
 ```
-
-## GitHub Actions
-
-- `terraform-plan.yml` — plan on infra PRs
-- `terraform-apply.yml` — manual apply
-- `terraform-destroy.yml` — manual destroy
 
 ## Prerequisites
 

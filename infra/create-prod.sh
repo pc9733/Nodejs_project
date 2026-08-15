@@ -46,7 +46,9 @@ terraform output
 
 echo "✅ Production environment created successfully!"
 echo ""
-echo "🔧 Next steps:"
+echo "🔧 Next steps (from repo root):"
 echo "1. Configure kubectl: aws eks update-kubeconfig --name practice-node-app-prod --region us-east-1"
-echo "2. Set secrets: ../scripts/setup-parameter-store.sh"
-echo "3. Deploy app: Actions → Deploy to Production (deploy-prod.yml)"
+echo "2. Set secrets: ./scripts/setup-parameter-store.sh"
+echo "3. Apply SecretStore: kubectl apply -f k8s/addons/external-secrets-prod.yaml"
+echo "4. Deploy app: kubectl apply -f k8s/environments/prod/all-in-one.yaml"
+echo "   (or GitHub Actions → Deploy to Production when ready)"

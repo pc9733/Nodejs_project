@@ -1,5 +1,9 @@
 # Workflows
 
+**Infra (create/destroy/update AWS):** use local scripts in `infra/` — not GitHub Actions.
+
+**App (build + deploy):** use the 3 workflows below (optional once clusters exist).
+
 ## Branch flow
 
 ```
@@ -14,22 +18,23 @@ feature/* ──PR──▶ develop ──PR──▶ main
 | `develop` | Integration — auto-deploys to **dev** |
 | `main` | Production-ready — deploy **prod** manually |
 
-## Workflows (6)
+## Workflows (3)
 
 | File | Trigger | Purpose |
 |---|---|---|
-| `node-ci.yml` | push/PR on feature, develop, main | Tests |
+| `node-ci.yml` | push/PR on feature, develop, main | Run tests |
 | `auto-deploy-dev.yml` | After CI succeeds on push to `develop` | Build + deploy to dev |
 | `deploy-prod.yml` | Manual | Build from `main` + deploy to prod |
-| `terraform-plan.yml` | PR touching `infra/**`, or manual | Terraform plan |
-| `terraform-apply.yml` | Manual | Terraform apply (dev or prod) |
-| `terraform-destroy.yml` | Manual | Terraform destroy (typed confirm) |
 
-## Which prod action?
+## When to use what
 
-Use **Deploy to Production** (`deploy-prod.yml`) after merging to `main`.
-
-Type the confirmation phrase when prompted.
+| Goal | Tool |
+|---|---|
+| Create / destroy cluster | `infra/create-*.sh` / `infra/destroy-*-simple.sh` |
+| Change VPC/EKS/node size | Edit `infra/environments/*/`, then `terraform plan` + `terraform apply` locally |
+| First app deploy on a cluster | `kubectl apply -f k8s/environments/<env>/all-in-one.yaml` |
+| Routine code → **dev** | Merge to `develop` (auto-deploy) |
+| Release → **prod** | Actions → **Deploy to Production** (type confirmation phrase) |
 
 ## Image tags
 
